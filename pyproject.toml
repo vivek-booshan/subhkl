@@ -1,7 +1,7 @@
 [project]
 name = "subhkl"
 description = "Solving crystal orientation from Laue images"
-dynamic = ["version"]
+version = "1.0.0"
 requires-python = ">=3.10"
 dependencies = [
     "h5py>=3.11.0",
@@ -10,69 +10,39 @@ dependencies = [
     "typer>=0.12.3",
     "opencv-python>=4.11.0",
     "gemmi>=0.7.3",
-    "tdqm>=0.0.1",
+    "tqdm>=4.67.3",
+    "evosax"
 ]
 license = { text = "GPL3.0" }
 
 [build-system]
-requires = [
-  "setuptools",
-   "wheel",
-   "toml",
-   "versioningit"
-]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build"]
+build-backend = "uv_build"
 
 [project.optional-dependencies]
-lint = ["ruff>=0.2.0"]
-test = [
+dev = [
+  "ruff>=0.2.0",
   "pytest>=8.0.2,<8.1.0",
   "pytest-cov>=4.1.0,<4.2.0",
   "pytest-dependency>=0.6.1"
 ]
+
 # JAX CPU-only (default JAX installation)
-jax = [
+cpu = [
   "jax[cpu]",
-  "evosax"
 ]
 # JAX with CUDA 12 support (NVIDIA GPUs)
-jax-cuda12 = [
+cuda12 = [
   "jax[cuda12]",
-  "evosax"
 ]
 # JAX with CUDA 11 support (older NVIDIA GPUs)
-jax-cuda11 = [
+cuda11 = [
   "jax[cuda11]",
-  "evosax"
 ]
 # JAX with ROCm support (AMD GPUs)
-jax-rocm = [
+rocm = [
   "jax[rocm]",
-  "evosax"
 ]
-
-[tool.versioningit.vcs]
-method = "git"
-match = ["v*"]
-default-tag = "0.0.1"
-
-[tool.versioningit.next-version]
-method = "minor"
-
-[tool.versioningit.format]
-distance = "{next_version}"
-dirty = "{next_version}"
-distance-dirty = "{next_version}"
-
-[tool.versioningit.write]
-file = "src/subhkl/_version.py"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-exclude = ["tests*"]
-
-[tool.setuptools.package-data]
-"*" = ["*.yml","*.yaml","*.ini"]
 
 [tool.pylint]
 max-line-length = 80
@@ -90,8 +60,6 @@ markers = [
     "integration: marks tests as integration tests",
 ]
 
-[tool.ruff]
-include = ["pyproject.toml", "src/**/*.py", "scripts/**/*.py", "tests/**/*.py"]
-
 [tool.ruff.lint]
 ignore = ["E741"]
+select = ["E", "F", "I", "PL"]
