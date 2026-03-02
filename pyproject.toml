@@ -11,7 +11,7 @@ dependencies = [
     "opencv-python>=4.11.0",
     "gemmi>=0.7.3",
     "tqdm>=4.67.3",
-    "evosax"
+    "evosax",
 ]
 license = { text = "GPL3.0" }
 
@@ -20,13 +20,6 @@ requires = ["uv_build"]
 build-backend = "uv_build"
 
 [project.optional-dependencies]
-dev = [
-  "ruff>=0.2.0",
-  "pytest>=8.0.2,<8.1.0",
-  "pytest-cov>=4.1.0,<4.2.0",
-  "pytest-dependency>=0.6.1"
-]
-
 # JAX CPU-only (default JAX installation)
 cpu = [
   "jax[cpu]",
@@ -63,3 +56,14 @@ markers = [
 [tool.ruff.lint]
 ignore = ["E741"]
 select = ["E", "F", "I", "PL"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.2.0",
+    "pytest>=8.0.2,<8.1.0",
+    "pytest-cov>=4.1.0,<4.2.0",
+    "pytest-dependency>=0.6.1",
+    "pytest-benchmark>=5.0.1",
+    "pytest-memray>=1.8.0",
+    "jedi-language-server>=0.46.0",
+]
