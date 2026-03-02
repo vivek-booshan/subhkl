@@ -21,14 +21,7 @@ ZENODO_BASE_URL="https://zenodo.org/records/${ZENODO_RECORD_ID}/files"
 DATA_DIR="tests/data/MANDI/mesolite"
 
 mkdir -p "${DATA_DIR}"
-
-# Download in parallel for speed
-for i in {11613..11684}; do
-    filename="MANDI_${i}.nxs.h5"
-    wget "${ZENODO_BASE_URL}/${filename}" -O "${DATA_DIR}/${filename}" &
-done
-
-wait  # Wait for all downloads to complete
+uvx zenodo_get 18475332 -o tests/data/MANDI/mesolite
 ```
 
 **Limit files for faster testing:**
