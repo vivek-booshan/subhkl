@@ -39,7 +39,7 @@ jobs:
         run: uv pip install -e . --system
       - name: Install dependencies (JAX backend)
         if: matrix.backend == 'jax'
-        run: uv pip install -e . --system
+        run: uv sync --extra jax --system
       - name: Verify backend
         run: |
           uv run python -c "import subhkl; print(f'Backend: {subhkl.OPTIMIZATION_BACKEND}'); assert subhkl.OPTIMIZATION_BACKEND == '${{ matrix.backend }}', f'Expected ${{ matrix.backend }}, got {subhkl.OPTIMIZATION_BACKEND}'"
