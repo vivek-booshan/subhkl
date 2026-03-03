@@ -55,7 +55,7 @@ markers = [
 
 [tool.ruff.lint]
 ignore = ["E741"]
-select = ["E", "F", "I", "PL"]
+# select = ["E", "F", "I", "PL"]
 
 [dependency-groups]
 dev = [

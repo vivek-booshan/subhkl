@@ -20,6 +20,8 @@ import inspect
 from typing import Any
 
 import sphinx.config
+import subhkl
+import subhkl._version
 
 
 def add(self, name: str, default: Any, rebuild: bool | str, types: Any) -> None:
@@ -28,8 +30,6 @@ def add(self, name: str, default: Any, rebuild: bool | str, types: Any) -> None:
 
 sphinx.config.Config.add = add
 
-import subhkl
-import subhkl._version
 
 # -- Project information -----------------------------------------------------
 
