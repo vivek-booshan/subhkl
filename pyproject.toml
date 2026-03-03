@@ -11,7 +11,6 @@ dependencies = [
     "opencv-python>=4.11.0",
     "gemmi>=0.7.3",
     "tqdm>=4.67.3",
-    "evosax",
 ]
 license = { text = "GPL3.0" }
 
@@ -23,18 +22,22 @@ build-backend = "uv_build"
 # JAX CPU-only (default JAX installation)
 cpu = [
   "jax[cpu]",
+  "evosax",
 ]
 # JAX with CUDA 12 support (NVIDIA GPUs)
 cuda12 = [
   "jax[cuda12]",
+  "evosax",
 ]
 # JAX with CUDA 11 support (older NVIDIA GPUs)
 cuda11 = [
   "jax[cuda11]",
+  "evosax",
 ]
 # JAX with ROCm support (AMD GPUs)
 rocm = [
   "jax[rocm]",
+  "evosax",
 ]
 
 [tool.pylint]
