@@ -33,6 +33,8 @@ where $\hat{k}_f$ and $\hat{k}_i$ are unit vectors along the scattered and incid
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
+
+uv add subhkl
 ```
 
 Then create a virtual environment and install the project:
@@ -51,14 +53,6 @@ source env/bin/activate  # On Windows: env\Scripts\activate
 python -m pip install -e .
 ```
 
-### Installing test dependencies
-
-```bash
-uv pip install -e ".[test]"  # with uv
-# or
-python -m pip install -e ".[test]"  # with pip
-```
-
 ### Installing optional JAX dependencies
 
 JAX is an optional dependency used for GPU-accelerated optimization algorithms. The package automatically uses JAX when available, falling back to NumPy otherwise.
@@ -73,13 +67,13 @@ pip install subhkl
 pip install subhkl[jax]
 
 # NVIDIA GPU support (CUDA 12.x)
-pip install subhkl[jax-cuda12]
+pip install subhkl[cuda12]
 
 # NVIDIA GPU support (CUDA 11.x - for older systems)
-pip install subhkl[jax-cuda11]
+pip install subhkl[cuda11]
 
 # AMD GPU support (ROCm)
-pip install subhkl[jax-rocm]
+pip install subhkl[rocm]
 ```
 
 **For development (editable install):**
