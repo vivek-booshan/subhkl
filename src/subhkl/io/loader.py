@@ -4,6 +4,7 @@ import h5py
 import numpy as np
 
 from subhkl.config import beamlines, reduction_settings
+
 from subhkl.core.crystallography import Lattice
 from subhkl.core.experiment import ExperimentData, PeaksData
 from subhkl.integration.image_data import ImageData
@@ -185,33 +186,33 @@ class ExperimentLoader:
         goniometer_names = data.get("goniometer/names")
         if goniometer_names and isinstance(goniometer_names[0], bytes):
             goniometer_names = [n.decode("utf-8") for n in goniometer_names]
+
         peaks = PeaksData(
-            data["peaks/two_theta"],
-            data["peaks/azimuthal"],
-            data["peaks/intensity"],
-            data["peaks/sigma"],
-            data.get("peaks/radius"),
-            data.get("peaks/xyz"),
+            two_theta=data["peaks/two_theta"],
+            azimuthal=data["peaks/azimuthal"],
+            intensity=data["peaks/intensity"],
+            sigma=data["peaks/sigma"],
+            radius=data.get("peaks/radius"),
+            xyz=data.get("peaks/xyz"),
         )
-        # 5. Assemble the ExperimentData
+
+        goniometer = Goniometer(
+            axes=data.get("goniometer/axes"),
+            angles=data.get("goniometer/angles"),
+            names=goniometer_names,
+            rotation=data.get("goniometer/R", np.eye(3)),
+            offsets=data.get("optimization/goniometer_offsets"),
+        )
+
         return ExperimentData(
             lattice=lattice,
-            a=lattice.a,
-            b=lattice.b,
-            c=lattice.c,
-            alpha=lattice.alpha,
-            beta=lattice.beta,
-            gamma=lattice.gamma,
+            peaks=peaks,
+            goniometer=goniometer,
             space_group=sg,
             wavelength=data["instrument/wavelength"],
             run_indices=run_indices,
             ki_vec=np.array(data.get("beam/ki_vec", [0.0, 0.0, 1.0])),
             base_sample_offset=np.array(data.get("sample/offset", [0.0, 0.0, 0.0])),
-            goniometer_axes=data.get("goniometer/axes"),
-            goniometer_angles=data.get("goniometer/angles"),
-            goniometer_names=goniometer_names,
-            base_gonio_offset=data.get("optimization/goniometer_offsets"),
-            R=data.get("goniometer/R", np.eye(3)),
         )
 
     @staticmethod

@@ -134,8 +134,8 @@ class Goniometer:
     angles: Optional[Union[List[float], np.ndarray]] = None
     rotation: np.ndarray = field(default_factory=lambda: np.eye(3))
 
-    # Optimization stuff
     offsets: Optional[np.ndarray] = None # static hardware offsets
+    base_offsets: Optional[np.ndarray] = None
 
 
     @staticmethod
