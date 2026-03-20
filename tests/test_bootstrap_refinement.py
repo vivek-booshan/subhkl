@@ -1,9 +1,10 @@
 import h5py
 import numpy as np
 
-from subhkl._optimization.findub import FindUB
-from subhkl.core.crystallography import Lattice
+from subhkl._optimization import calibrate, FindUB
+from subhkl.core import Lattice
 from subhkl.io.loader import ExperimentLoader
+
 
 # from subhkl.optimization import FindUB
 
@@ -89,9 +90,8 @@ def test_u_absorbs_gonio_offset(tmp_path):
 
     experiment = ExperimentLoader.from_dict(data)
     fu = FindUB(data=experiment)
-
     # --- Run 1: WITH goniometer refinement ---
-    score1, hkl1, lamda1, U1 = fu.minimize(
+    num_indexed, hkl, lamda, U = fu.minimize(
         strategy_name="DE",
         population_size=500,
         num_generations=150,
@@ -112,8 +112,8 @@ def test_u_absorbs_gonio_offset(tmp_path):
         f["sample/beta"] = beta
         f["sample/gamma"] = gamma
         f["sample/space_group"] = space_group
-        f["sample/U"] = U1
-        f["sample/B"] = fu.reciprocal_lattice_B()
+        f["sample/U"] = U
+        f["sample/B"] = fu.lattice.get_b_matrix()
         f["goniometer/R"] = fu.goniometer.rotation
         f["optimization/goniometer_offsets"] = fu.goniometer.offsets
         f["optimization/best_params"] = fu.x
@@ -121,9 +121,8 @@ def test_u_absorbs_gonio_offset(tmp_path):
         f["instrument/wavelength"] = [1.0, 8.5]
 
     # --- Run 2: WITHOUT goniometer refinement (BOOTSTRAP) ---
-    fu2 = FindUB(data=experiment)
-    _ = fu2.get_bootstrap_params(
-        str(bootstrap_file), refine_lattice=False, refine_goniometer=False
+    _, fu2 = calibrate(
+        experiment, str(bootstrap_file), refine_lattice=False, refine_goniometer=False
     )
 
     # VERIFY PERSISTENCE (THE CORE FIX)
