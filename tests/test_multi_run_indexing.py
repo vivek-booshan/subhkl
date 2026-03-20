@@ -2,7 +2,9 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from subhkl.optimization import FindUB, VectorizedObjective
+from subhkl.io.loader import ExperimentLoader
+from subhkl.core import Lattice
+from subhkl._optimization import FindUB, VectorizedObjective
 
 
 def generate_synthetic_data(
@@ -19,10 +21,7 @@ def generate_synthetic_data(
     space_group="P 1",
     hkl_range_k=None,
 ):
-    fu_helper = FindUB()
-    fu_helper.a, fu_helper.b, fu_helper.c = a, b, c
-    fu_helper.alpha, fu_helper.beta, fu_helper.gamma = alpha, beta, gamma
-    B = fu_helper.reciprocal_lattice_B()
+    B = Lattice(a, b, c, alpha, beta, gamma).get_b_matrix()
     all_tt, all_az, all_run, all_angles, all_R, all_xyz = [], [], [], [], [], []
     if hkl_range_k is None:
         hkl_range_k = 10
@@ -96,8 +95,8 @@ def test_multi_run_indexing_refinement():
     gonio_axes = np.array([[0, 1, 0, 1]])
     rotations = [[0.0], [45.0]]
     data = generate_synthetic_data(a, b, c, 90, 90, 90, U_true, rotations, gonio_axes)
-    fu = FindUB(data=data)
-    num_peaks, hkl_res, lam_res, U_res = fu.minimize(
+    experiment = ExperimentLoader.from_dict(data)
+    num_peaks, hkl_res, lam_res, U_res = FindUB(experiment).minimize(
         strategy_name="DE",
         population_size=200,
         num_generations=100,
@@ -113,10 +112,9 @@ def test_multi_run_indexing_refinement():
 
 
 def test_clipping_logic_direct():
-    fu = FindUB()
-    fu.a, fu.b, fu.c = 10, 10, 10
-    fu.alpha, fu.beta, fu.gamma = 90, 90, 90
-    B = fu.reciprocal_lattice_B()
+    a, b, c = 10, 10, 10
+    alpha, beta, gamma = 90, 90, 90
+    B = Lattice(a, b, c, alpha, beta, gamma).get_b_matrix()
     obj = VectorizedObjective(
         B=B,
         kf_ki_dir=np.zeros((3, 4)),
@@ -164,7 +162,8 @@ def test_sample_offset_refinement_multirun():
         gonio_axes,
         sample_offset_true=s_true,
     )
-    fu = FindUB(data=data)
+    experiment =ExperimentLoader().from_dict(data)
+    fu = FindUB(data=experiment)
     num_peaks, hkl_res, lam_res, U_res = fu.minimize(
         strategy_name="DE",
         population_size=100,
