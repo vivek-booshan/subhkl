@@ -1,2 +1,8 @@
 from .calibrate import calibrate
-__all__ = ["calibrate"]
+from .findub import FindUB
+from .optimization import VectorizedObjective
+__all__ = [
+    "calibrate",
+    "VectorizedObjective",
+    "FindUB",
+]
