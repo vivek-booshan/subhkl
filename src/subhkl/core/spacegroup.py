@@ -1,6 +1,16 @@
 import gemmi
 import numpy as np
 
+from subhkl.core.models import LatticeSystem
+
+LATTICE_MAP = {
+    "cubic": LatticeSystem.CUBIC,
+    "hexagonal": LatticeSystem.HEXAGONAL,
+    "tetragonal": LatticeSystem.TETRAGONAL,
+    "orthorhombic": LatticeSystem.ORTHORHOMBIC,
+    "monoclinic": LatticeSystem.MONOCLINIC,
+    "triclinic": LatticeSystem.TRICLINIC,
+}
 
 def get_space_group_object(sg_name_or_centering):
     """
