@@ -181,6 +181,21 @@ class Lattice:
         # B transforms HKL indices to Cartesian reciprocal coordinates: q = B @ hkl
         return jsl.cholesky(G_star, lower=False)
 
+    # NOTE(vivek): uses numpy
+    @classmethod
+    def from_b_matrix(cls, B, system: LatticeSystem=LatticeSystem.TRICLINIC):
+        G_star = B.T @ B
+        G = np.linalg.inv(G_star)
+        a = np.sqrt(G[0, 0])
+        b = np.sqrt(G[1, 1])
+        c = np.sqrt(G[2, 2])
+
+        alpha = np.rad2deg(np.arccos(G[1, 2] / (b * c)))
+        beta = np.rad2deg(np.arccos(G[0, 2] / (a * c)))
+        gamma = np.rad2deg(np.arccos(G[0, 1] / (a * b)))
+
+        return cls(a, b, c, alpha, beta, gamma, system)
+
     @staticmethod
     def check_constraints(
         params: np.ndarray, system: LatticeSystem, atol_len: float, atol_ang: float
