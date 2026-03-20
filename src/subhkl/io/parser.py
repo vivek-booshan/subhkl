@@ -905,13 +905,13 @@ def peak_predictor(
         print(f"Applying refined goniometer offsets from indexer: {offsets}")
         # Re-calculate refined R stack for the TARGET images
         if (
-            peaks.goniometer.angles_raw is not None
-            and peaks.goniometer.axes_raw is not None
+            peaks.goniometer.angles is not None
+            and peaks.goniometer.axes is not None
         ):
-            angles_refined = peaks.goniometer.angles_raw + offsets[None, :]
+            angles_refined = peaks.goniometer.angles + offsets[None, :]
             all_R = np.stack(
                 [
-                    calc_goniometer_rotation_matrix(peaks.goniometer.axes_raw, ang)
+                    calc_goniometer_rotation_matrix(peaks.goniometer.axes, ang)
                     for ang in angles_refined
                 ]
             )
@@ -979,14 +979,14 @@ def peak_predictor(
         try:
             goniometer_angles_to_save = angles_refined
         except NameError:
-            goniometer_angles_to_save = peaks.goniometer.angles_raw
+            goniometer_angles_to_save = peaks.goniometer.angles
 
         f["goniometer/angles"] = goniometer_angles_to_save
-        f["goniometer/axes"] = peaks.goniometer.axes_raw
-        if peaks.goniometer.names_raw:
+        f["goniometer/axes"] = peaks.goniometer.axes
+        if peaks.goniometer.names:
             dt = h5py.string_dtype(encoding="utf-8")
             f.create_dataset(
-                "goniometer/names", data=peaks.goniometer.names_raw, dtype=dt
+                "goniometer/names", data=peaks.goniometer.names, dtype=dt
             )
 
         f["sample/offset"] = sample_offset
@@ -1096,7 +1096,7 @@ def integrator(
         all_R = peaks.goniometer.rotation
 
     if angles_stack is None:
-        angles_stack = peaks.goniometer.angles_raw
+        angles_stack = peaks.goniometer.angles
 
     UB = U @ B
     if all_R.ndim == 3:
@@ -1220,14 +1220,14 @@ def reduce(
 
     # 3. Prepare Metadata
     # Repeat angles for each bank so they stay aligned after merging
-    if peaks_handler.goniometer.angles_raw is not None:
+    if peaks_handler.goniometer.angles is not None:
         # shape (1, 3) -> (N_banks, 3)
-        angles_repeated = np.tile(peaks_handler.goniometer.angles_raw, (n_images, 1))
+        angles_repeated = np.tile(peaks_handler.goniometer.angles, (n_images, 1))
     else:
         angles_repeated = np.zeros((n_images, 3))  # Fallback
 
-    if peaks_handler.goniometer.axes_raw is not None:
-        axes = np.array(peaks_handler.goniometer.axes_raw)
+    if peaks_handler.goniometer.axes is not None:
+        axes = np.array(peaks_handler.goniometer.axes)
     else:
         axes = np.array([0.0, 1.0, 0.0])  # Fallback
 
@@ -1244,11 +1244,11 @@ def reduce(
         # Metadata (Constant)
         f.create_dataset("goniometer/axes", data=axes)
 
-        if peaks_handler.goniometer.names_raw:
+        if peaks_handler.goniometer.names:
             dt = h5py.string_dtype(encoding="utf-8")
             f.create_dataset(
                 "goniometer/names",
-                data=peaks_handler.goniometer.names_raw,
+                data=peaks_handler.goniometer.names,
                 dtype=dt,
             )
 

@@ -129,15 +129,15 @@ def prepare_harvest_tasks(
             current_R = goniometer.rotation
 
         current_angles = None
-        if goniometer.angles_raw is not None:
-            if goniometer.angles_raw.ndim == 2:
+        if goniometer.angles is not None:
+            if goniometer.angles.ndim == 2:
                 current_angles = (
-                    goniometer.angles_raw[img_key]
-                    if img_key < len(goniometer.angles_raw)
-                    else goniometer.angles_raw[-1]
+                    goniometer.angles[img_key]
+                    if img_key < len(goniometer.angles)
+                    else goniometer.angles[-1]
                 )
             else:
-                current_angles = goniometer.angles_raw
+                current_angles = goniometer.angles
 
         pre_coords = None
         if finder_algorithm == "sparse_rbf":

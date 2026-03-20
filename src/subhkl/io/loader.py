@@ -1,12 +1,16 @@
+import os
 import re
 import h5py
 import numpy as np
-from subhkl.config import beamlines, reduction_settings
-from subhkl.integration.image_data import ImageData
 
+from subhkl.config import beamlines, reduction_settings
+from subhkl.core.crystallography import Lattice
+from subhkl.core.experiment import ExperimentData, PeaksData
+from subhkl.integration.image_data import ImageData
+from subhkl.instrument.goniometer import Goniometer
 
 class ImageLoader:
-    def load_nexus(filename: str, instrument) -> ImageData:
+    def from_nexus(filename: str, instrument) -> ImageData:
         detectors = beamlines[instrument]
         settings = reduction_settings[instrument]
         ims = {}
@@ -33,7 +37,7 @@ class ImageLoader:
 
         return ImageData(ims=ims)
 
-    def load_merged_h5(filename: str) -> ImageData:
+    def from_h5(filename: str) -> ImageData:
         ims = {}
         bank_mapping = {}
         with h5py.File(filename, "r") as f:
@@ -63,3 +67,175 @@ class ImageLoader:
             file_offsets=file_offsets,
             bank_mapping=bank_mapping,
         )
+
+class GoniometerLoader:
+    def from_nexus(filename: str, instrument: str):
+        """
+        Get goniometer axes and rotation angles from Nexus file
+
+        Parameters
+        ----------
+        filename : str
+            Name of nexus file to load angles from
+
+        instrument : str
+            Name of instrument used to collect data
+
+        Returns
+        -------
+        axes : list[length 4 numpy array]
+            List of axes in format used by Mantid `SetGoniometer`
+        angles : list[float]
+            List of angles in degrees about the axes
+        names : list[str]
+            List of axis names
+        """
+        settings = reduction_settings[instrument]
+        axes, angles, names = [], [], []
+        with h5py.File(filename) as f:
+            try:
+                das_logs = f["entry/DASlogs"]
+
+                # We can iterate directly over settings["Goniometer"] as of Python 3.6
+                # which guarantees that `json.load` keeps the iteration order of keys
+                # the same as it is in the original file.
+                # So this should work fine--assuming the order is correct in
+                # `reduction_settings.json`, that is!
+                for axis_name, axis_spec in settings["Goniometer"].items():
+                    angle_deg = float(das_logs[axis_name]["average_value"][0])
+                    axis = np.array(axis_spec, dtype=float)
+                    angles.append(angle_deg)
+                    axes.append(axis)
+                    names.append(axis_name)
+            except Exception:
+                pass
+
+        rotation = Goniometer.get_rotation(axes, angles)
+
+        return Goniometer(
+            axes=axes,
+            angles=np.array(angles),
+            names=names,
+            rotation=rotation,
+        )
+
+    def from_h5(h5_file):
+        axes = h5_file["goniometer/axes"][()]
+        angles = h5_file["goniometer/angles"][()]
+        names = None
+        if "goniometer/names" in h5_file:
+            names = [
+                n.decode() if isinstance(n, bytes) else str(n)
+                for n in h5_file["goniometer/names"][()]
+            ]
+
+        # Handle 2D angles (stack of matrices) vs 1D angles
+        if angles.ndim == 2:
+            rotation = np.stack([Goniometer.get_rotation(axes, ang) for ang in angles])
+        else:
+            rotation = Goniometer.get_rotation(axes, angles)
+
+        return Goniometer(axes=axes, angles=angles, names=names, rotation=rotation)
+
+
+class ExperimentLoader:
+    @classmethod
+    def from_h5(cls, filename: str) -> ExperimentData:
+        """Entry point for HDF5 files."""
+        if not os.path.exists(filename):
+            raise FileNotFoundError(f"Could not find peak file: {filename}")
+
+        # Flatten HDF5 groups into a flat dictionary for easier mapping
+        with h5py.File(os.path.abspath(filename), "r") as f:
+            raw_data = {}
+
+            def _visitor(name, obj):
+                if isinstance(obj, h5py.Dataset):
+                    raw_data[name] = obj[()]
+
+            f.visititems(_visitor)
+
+            return cls.from_dict(raw_data)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ExperimentData:
+        """The core mapping logic. Decouples dictionary keys from class attributes."""
+
+        sg = data.get("sample/space_group", "P1")
+        if isinstance(sg, bytes):
+            sg = sg.decode("utf-8")
+        else:
+            sg = str(sg)
+
+        sample_cell = (
+            data["sample/a"],
+            data["sample/b"],
+            data["sample/c"],
+            data["sample/alpha"],
+            data["sample/beta"],
+            data["sample/gamma"],
+        )
+
+        system, _ = Lattice.infer_system(sample_cell, sg)
+        lattice = Lattice(*sample_cell, system)
+
+
+        run_indices = cls._resolve_run_indices(data)
+
+        goniometer_names = data.get("goniometer/names")
+        if goniometer_names and isinstance(goniometer_names[0], bytes):
+            goniometer_names = [n.decode("utf-8") for n in goniometer_names]
+        peaks = PeaksData(
+            data["peaks/two_theta"],
+            data["peaks/azimuthal"],
+            data["peaks/intensity"],
+            data["peaks/sigma"],
+            data.get("peaks/radius"),
+            data.get("peaks/xyz"),
+        )
+        # 5. Assemble the ExperimentData
+        return ExperimentData(
+            lattice=lattice,
+            a=lattice.a,
+            b=lattice.b,
+            c=lattice.c,
+            alpha=lattice.alpha,
+            beta=lattice.beta,
+            gamma=lattice.gamma,
+            space_group=sg,
+            wavelength=data["instrument/wavelength"],
+            run_indices=run_indices,
+            ki_vec=np.array(data.get("beam/ki_vec", [0.0, 0.0, 1.0])),
+            base_sample_offset=np.array(data.get("sample/offset", [0.0, 0.0, 0.0])),
+            goniometer_axes=data.get("goniometer/axes"),
+            goniometer_angles=data.get("goniometer/angles"),
+            goniometer_names=goniometer_names,
+            base_gonio_offset=data.get("optimization/goniometer_offsets"),
+            R=data.get("goniometer/R", np.eye(3)),
+        )
+
+    @staticmethod
+    def _resolve_run_indices(data: dict) -> np.ndarray:
+        """Handles the logic of matching peaks to rotation matrices/runs."""
+        r_stack = data.get("goniometer/R")
+        idx_run = data.get("peaks/run_index")
+        idx_img = data.get("peaks/image_index")
+        idx_bank = data.get("bank") or data.get("bank_ids")
+
+        # Preference hierarchy for peak grouping
+        if r_stack is not None and r_stack.ndim == 3:
+            num_rot = r_stack.shape[0]
+            for candidate in [idx_run, idx_img, idx_bank]:
+                if candidate is not None and int(np.max(candidate)) + 1 == num_rot:
+                    return candidate
+
+        if idx_run is not None:
+            return idx_run
+        if idx_img is not None:
+            return idx_img
+        if idx_bank is not None:
+            return idx_bank
+
+        # Fallback: single run for all peaks
+        num_peaks = len(data["peaks/two_theta"])
+        return np.zeros(num_peaks, dtype=int)

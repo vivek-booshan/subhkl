@@ -32,18 +32,18 @@ def _init_goniometer(
         with h5py.File(filename, "r") as f:
             if axes is None or angles is None:
                 if "goniometer/axes" in f and "goniometer/angles" in f:
-                    return Goniometer.from_h5_file(f)
+                    return loader.GoniometerLoader.from_h5(f)
 
     if ext == ".h5" and not is_merged:
         try:
-            return Goniometer.from_nexus(filename, instrument)
+            return loader.GoniometerLoader.from_nexus(filename, instrument)
         except Exception as e:
             print(f"Warning: Failed to extract goniometer from nexus file: {e}")
 
     if axes is not None and angles is not None:
         rot = Goniometer.get_rotation(axes, angles)
         return Goniometer(
-            axes_raw=axes, angles_raw=angles, names_raw=None, rotation=rot
+            axes=axes, angles=angles, names=None, rotation=rot
         )
 
     return Goniometer()
@@ -70,9 +70,9 @@ def _init_wavelength(
 def _init_ims(filename: str, ext: str, instrument: str, is_merged: bool) -> ImageData:
     if ext == ".h5":
         if is_merged:
-            image_data = loader.ImageLoader.load_merged_h5(filename)
+            image_data = loader.ImageLoader.from_h5(filename)
         else:
-            image_data = loader.ImageLoader.load_nexus(filename, instrument)
+            image_data = loader.ImageLoader.from_nexus(filename, instrument)
         return image_data
     else:
         ims = {0: np.array(PIL.Image.open(filename))}
@@ -386,9 +386,9 @@ class Peaks:
             banks,
             image_indices,
             run_ids,
-            self.goniometer.axes_raw,
+            self.goniometer.axes,
             gonio_angles_out,
-            self.goniometer.names_raw,
+            self.goniometer.names,
         )
 
     def _assemble_integration_result(self, peak_dict, results_by_bank):
