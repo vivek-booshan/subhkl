@@ -98,7 +98,7 @@ def get_q_lab(
     return q_lab
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class Lattice:
     """
     Represents a crystal lattice and handles transformations between
