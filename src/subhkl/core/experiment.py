@@ -32,7 +32,7 @@ class PeaksData:
         weights = weights / (np.mean(weights) + 1e-12)
         return np.clip(weights, 0, 10.0)
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ExperimentData:
     lattice: Lattice
     peaks: PeaksData

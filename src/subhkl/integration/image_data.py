@@ -5,7 +5,7 @@ import numpy as np
 from typing import Dict, List, Optional
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ImageData:
     ims: Dict[int, np.ndarray]
     file_offsets: Optional[np.ndarray] = None

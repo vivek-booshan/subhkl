@@ -9,16 +9,16 @@ from subhkl.instrument.goniometer import Goniometer
 from subhkl.peakfinder.sparse_rbf import SparseRBFPeakFinder
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Wavelength:
     min: float = None
     max: float = None
 
     def __iter__(self):
-        return iter((self.min, self.max))
+        return iter(astuple(self))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DetectorPeaks:
     R: List[Any]
     two_theta: List[float]
@@ -45,7 +45,7 @@ class DetectorPeaks:
         return astuple(self)[index]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class IntegrationResult:
     h: List[float]
     k: List[float]
