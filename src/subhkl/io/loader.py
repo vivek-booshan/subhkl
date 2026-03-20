@@ -221,7 +221,7 @@ class ExperimentLoader:
         r_stack = data.get("goniometer/R")
         idx_run = data.get("peaks/run_index")
         idx_img = data.get("peaks/image_index")
-        idx_bank = data.get("bank") or data.get("bank_ids")
+        idx_bank = data.get("bank", data.get("bank_ids"))
 
         # Preference hierarchy for peak grouping
         if r_stack is not None and r_stack.ndim == 3:
