@@ -1,8 +1,11 @@
 import h5py
 import numpy as np
 
-from subhkl.optimization import FindUB
+from subhkl._optimization.findub import FindUB
+from subhkl.core.crystallography import Lattice
+from subhkl.io.loader import ExperimentLoader
 
+# from subhkl.optimization import FindUB
 
 def test_u_absorbs_gonio_offset(tmp_path):
     """
@@ -33,10 +36,11 @@ def test_u_absorbs_gonio_offset(tmp_path):
     hkls = np.stack([h.flatten(), k.flatten(), l.flatten()], axis=1)
     hkls = hkls[np.linalg.norm(hkls, axis=1) > 0]
 
-    fu_helper = FindUB()
-    fu_helper.a, fu_helper.b, fu_helper.c = a, b, c
-    fu_helper.alpha, fu_helper.beta, fu_helper.gamma = alpha, beta, gamma
-    B = fu_helper.reciprocal_lattice_B()
+    # NOTE(vivek): can't create class with no argument anymore, use lattice to get matrix
+    # fu_helper = FindUB()
+    # fu_helper.a, fu_helper.b, fu_helper.c = a, b, c
+    # fu_helper.alpha, fu_helper.beta, fu_helper.gamma = alpha, beta, gamma
+    B = Lattice(a, b, c, alpha, beta, gamma).get_b_matrix()
 
     RUB_true = R_true @ U_true @ B
     Q_lab_unscaled = (RUB_true @ hkls.T).T
@@ -83,7 +87,8 @@ def test_u_absorbs_gonio_offset(tmp_path):
         "peaks/azimuthal": az_phi,
     }
 
-    fu = FindUB(data=data)
+    experiment = ExperimentLoader.from_dict(data)
+    fu = FindUB(data=experiment)
 
     # --- Run 1: WITH goniometer refinement ---
     score1, hkl1, lamda1, U1 = fu.minimize(
@@ -109,20 +114,20 @@ def test_u_absorbs_gonio_offset(tmp_path):
         f["sample/space_group"] = space_group
         f["sample/U"] = U1
         f["sample/B"] = fu.reciprocal_lattice_B()
-        f["goniometer/R"] = fu.R
-        f["optimization/goniometer_offsets"] = fu.goniometer_offsets
+        f["goniometer/R"] = fu.goniometer.rotation
+        f["optimization/goniometer_offsets"] = fu.goniometer.offsets
         f["optimization/best_params"] = fu.x
         f["beam/ki_vec"] = fu.ki_vec
         f["instrument/wavelength"] = [1.0, 8.5]
 
     # --- Run 2: WITHOUT goniometer refinement (BOOTSTRAP) ---
-    fu2 = FindUB(data=data)
+    fu2 = FindUB(data=experiment)
     _ = fu2.get_bootstrap_params(
         str(bootstrap_file), refine_lattice=False, refine_goniometer=False
     )
 
     # VERIFY PERSISTENCE (THE CORE FIX)
-    assert np.allclose(fu2.base_gonio_offset, fu.goniometer_offsets)
+    assert np.allclose(fu2.goniometer.base_offsets, fu.goniometer.offsets)
     assert np.allclose(fu2.ki_vec, fu.ki_vec)
 
     # We can also check that U1 was loaded as the starting point for Run 2

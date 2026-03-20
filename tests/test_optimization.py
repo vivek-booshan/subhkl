@@ -2,8 +2,9 @@ import numpy as np
 import pytest
 import scipy.linalg
 
-from subhkl import optimization
-
+from subhkl.io.loader import ExperimentLoader
+from subhkl._optimization import findub as optimization 
+# from subhkl import optimization
 
 def test_backend_flags_and_require_jax():
     # Module exposes HAS_JAX and OPTIMIZATION_BACKEND
@@ -38,6 +39,7 @@ def test_get_lattice_system_simple_cubic():
 
 
 def test_findub_load_from_dict_and_reciprocal_B():
+
     data = {}
     data["sample/a"] = 10.0
     data["sample/b"] = 10.0
@@ -54,8 +56,11 @@ def test_findub_load_from_dict_and_reciprocal_B():
     data["peaks/radius"] = np.array([0.0])
     data["sample/space_group"] = "P 1"
 
-    fu = optimization.FindUB(data=data)
-    B = fu.reciprocal_lattice_B()
+
+    # NOTE(vivek): enforce explicit loading of data and passing to FindUB
+    experiment_data = ExperimentLoader.from_dict(data)
+    fu = optimization.FindUB(data=experiment_data)
+    B = fu.lattice.get_b_matrix()
     assert B.shape == (3, 3)
 
     # Recompute expected B via metric tensor
