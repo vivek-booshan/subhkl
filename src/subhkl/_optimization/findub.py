@@ -1,3 +1,4 @@
+from dataclasses import replace
 import h5py
 import numpy as np
 import scipy.interpolate
@@ -64,7 +65,6 @@ class FindUB:
         cdf = (t - np.sin(t)) / np.pi
         self._angle_cdf = cdf
         self._angle_t = t
-        self._angle = scipy.interpolate.interp1d(cdf, t, kind="linear")
 
     def reciprocal_lattice_B(self):
         warnings.warn(
@@ -77,83 +77,6 @@ class FindUB:
         return Lattice(
             self.a, self.b, self.c, self.alpha, self.beta, self.gamma
         ).get_b_matrix()
-
-    def get_bootstrap_params(
-        self,
-        bootstrap_filename,
-        refine_lattice=False,
-        lattice_bound_frac=0.05,
-        refine_sample=False,
-        sample_bound_meters=0.002,
-        refine_beam=False,
-        beam_bound_deg=1.0,
-        refine_goniometer=False,
-        goniometer_bound_deg=5.0,
-        refine_goniometer_axes=None,
-    ):
-        print(f"Bootstrapping from physical solution: {bootstrap_filename}")
-
-        with h5py.File(bootstrap_filename, "r") as f:
-            raw_x = f.get("optimization/best_params")
-            orientation = raw_x[()][:3] if raw_x is not None else np.zeros(3)
-
-            new_params = [orientation]
-
-            if refine_lattice:
-                b_lat, _ = Lattice.infer_system(
-                    lattice_input=(
-                        f["sample/a"][()],
-                        f["sample/b"][()],
-                        f["sample/c"][()],
-                        f["sample/alpha"][()],
-                        f["sample/beta"][()],
-                        f["sample/gamma"][()],
-                    ),
-                    space_group=self.space_group,
-                    return_type="lattice",
-                )
-
-                self.lattice = b_lat
-                print(
-                    f"  > Recentered Lattice: {self.lattice.a:.2f}, {self.lattice.b:.2f}..."
-                )
-
-            num_free = LATTICE_CONFIG[self.lattice.system]["num_params"]
-            new_params.append(np.full(num_free, 0.5))
-
-            self.base_sample_offset = f.get("sample/offset", np.zeros(3))[()]
-            if refine_sample:
-                new_params.append(np.full(3, 0.5))
-
-            # beam vector
-            self.ki_vec = f.get("beam/ki_vec", np.array([0.0, 0.0, 1.0]))[()]
-            if refine_beam:
-                new_params.append(np.full(2, 0.5))
-
-            b_gonio_offsets = f.get("optimization/goniometer_offsets", None)
-            if b_gonio_offsets is not None:
-                self.goniometer.base_offsets = b_gonio_offsets[()]
-                print(f"  > Setting Base Goniometer Offsets: {self.goniometer.base_offsets}")
-            elif self.goniometer.axes is not None:
-                self.goniometer.base_offsets = np.zeros(len(self.goniometer.axes))
-
-            if refine_goniometer:
-                ref_list = self.goniometer.names or range(
-                    len(self.goniometer.axes or [])
-                )
-
-                if refine_goniometer_axes and self.goniometer.names:
-                    mask = [
-                        any(req in name for req in refine_goniometer_axes)
-                        for name in self.goniometer.names
-                    ]
-                else:
-                    mask = [True] * len(ref_list)
-
-                if (n_active := sum(mask)) > 0:
-                    new_params.append(np.full(n_active, 0.5))
-
-            return np.concatenate([np.atleast_1d(p) for p in new_params])
 
     def _minimize_scipy(
         self,
@@ -242,7 +165,11 @@ class FindUB:
         )
 
         # Use per-observation rotation if no refinement
-        static_R_input = self.goniometer.rotation if self.goniometer.rotation is not None else np.eye(3)
+        static_R_input = (
+            self.goniometer.rotation
+            if self.goniometer.rotation is not None
+            else np.eye(3)
+        )
 
         # Prepare weights
         snr = self.peaks.intensity / (self.peaks.sigma + 1e-6)
@@ -267,7 +194,14 @@ class FindUB:
             angle_t=self._angle_t,
             weights=weights,
             tolerance_deg=tolerance_deg,
-            cell_params=[lattice.a, lattice.b, lattice.c, lattice.alpha, lattice.beta, lattice.gamma],
+            cell_params=[
+                lattice.a,
+                lattice.b,
+                lattice.c,
+                lattice.alpha,
+                lattice.beta,
+                lattice.gamma,
+            ],
             refine_lattice=refine_lattice,
             lattice_bound_frac=lattice_bound_frac,
             lattice_system=lattice_system,
@@ -458,53 +392,6 @@ class FindUB:
         R = I + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
         return R
 
-    def _compute_B_numpy(self, params_norm, lattice_system, lattice_bound_frac):
-        """NumPy version of B matrix computation."""
-        # Reconstruct cell params
-        cell_init = np.array(
-            [self.a, self.b, self.c, self.alpha, self.beta, self.gamma]
-        )
-        active_indices = _get_active_lattice_indices(lattice_system)
-        free_params_init = cell_init[active_indices]
-
-        p_free = _forward_map_lattice(params_norm, free_params_init, lattice_bound_frac)
-
-        # Reconstruct full cell params based on lattice system
-        if lattice_system == "Cubic":
-            a = p_free[0]
-            cell_params = np.array([a, a, a, 90.0, 90.0, 90.0])
-        elif lattice_system == "Hexagonal":
-            a, c = p_free[0], p_free[1]
-            cell_params = np.array([a, a, c, 90.0, 90.0, 120.0])
-        elif lattice_system == "Tetragonal":
-            a, c = p_free[0], p_free[1]
-            cell_params = np.array([a, a, c, 90.0, 90.0, 90.0])
-        elif lattice_system == "Rhombohedral":
-            a, alpha = p_free[0], p_free[1]
-            cell_params = np.array([a, a, a, alpha, alpha, alpha])
-        elif lattice_system == "Orthorhombic":
-            a, b, c = p_free[0], p_free[1], p_free[2]
-            cell_params = np.array([a, b, c, 90.0, 90.0, 90.0])
-        elif lattice_system == "Monoclinic":
-            a, b, c, beta = p_free[0], p_free[1], p_free[2], p_free[3]
-            cell_params = np.array([a, b, c, 90.0, beta, 90.0])
-        else:
-            cell_params = p_free
-
-        # Compute B matrix
-        a, b, c = cell_params[:3]
-        alpha, beta, gamma = np.deg2rad(cell_params[3:])
-
-        g11, g22, g33 = a**2, b**2, c**2
-        g12 = a * b * np.cos(gamma)
-        g13 = a * c * np.cos(beta)
-        g23 = b * c * np.cos(alpha)
-
-        G = np.array([[g11, g12, g13], [g12, g22, g23], [g13, g23, g33]])
-        G_star = np.linalg.inv(G)
-        B = scipy.linalg.cholesky(G_star, lower=False)
-        return B
-
     def _cell_from_B_numpy(self, B):
         """Extract cell parameters from B matrix."""
         G_star = B.T @ B
@@ -519,45 +406,6 @@ class FindUB:
         gamma = np.rad2deg(np.arccos(G[0, 1] / (a * b)))
 
         return np.array([a, b, c, alpha, beta, gamma])
-
-    def _rotation_matrix_from_axis_angle_numpy(self, axis, angle_rad):
-        """NumPy version of axis-angle rotation."""
-        u = axis / np.linalg.norm(axis)
-        ux, uy, uz = u
-        K = np.array([[0.0, -uz, uy], [uz, 0.0, -ux], [-uy, ux, 0.0]])
-        c = np.cos(angle_rad)
-        s = np.sin(angle_rad)
-        R = np.eye(3) + s * K + (1.0 - c) * (K @ K)
-        return R
-
-    def _compute_goniometer_R_numpy(self, axes, angles, offsets_norm, bound_deg):
-        """NumPy version of goniometer rotation matrices."""
-        # offsets_norm is (num_axes,)
-        offsets_delta = _forward_map_param(offsets_norm, bound_deg)
-        total_offsets = (
-            self.goniometer.base_offsets + offsets_delta
-            if self.goniometer.base_offsets is not None
-            else offsets_delta
-        )
-
-        # angles is (num_axes, num_runs) or (num_axes, num_obs)
-        angles_deg = total_offsets[:, np.newaxis] + angles
-        num_runs = angles.shape[1]
-        R_stack = np.tile(np.eye(3)[np.newaxis, ...], (num_runs, 1, 1))
-
-        deg2rad = np.pi / 180.0
-        for i in range(len(axes)):
-            axis_spec = axes[i]
-            direction = axis_spec[:3]
-            sign = axis_spec[3]
-            theta = sign * angles_deg[i, :] * deg2rad
-
-            for r in range(num_runs):
-                Ri = self._rotation_matrix_from_axis_angle_numpy(direction, theta[r])
-                # Mantid SetGoniometer: R = R0 @ R1 @ R2
-                R_stack[r] = R_stack[r] @ Ri
-
-        return R_stack
 
     def minimize(
         self,
@@ -646,7 +494,11 @@ class FindUB:
         # If goniometer data is per-peak, reduce it to per-run (image) IF AND ONLY IF
         # all peaks in a run share the same geometry. This saves memory in the
         # optimizer. If they differ, we MUST use per-peak indexing.
-        static_R_input = self.goniometer.rotation if self.goniometer.rotation is not None else np.eye(3)
+        static_R_input = (
+            self.goniometer.rotation
+            if self.goniometer.rotation is not None
+            else np.eye(3)
+        )
         if self.run_indices is not None:
             max_run_id = int(np.max(self.run_indices))
             num_runs_range = max_run_id + 1
@@ -690,7 +542,11 @@ class FindUB:
                 new_R[:] = self.goniometer.rotation[first_indices[0:1]]
                 new_R[unique_runs] = self.goniometer.rotation[first_indices]
                 static_R_input = new_R
-            elif self.goniometer.rotation is not None and self.goniometer.rotation.ndim == 3 and self.goniometer.rotation.shape[0] == num_obs:
+            elif (
+                self.goniometer.rotation is not None
+                and self.goniometer.rotation.ndim == 3
+                and self.goniometer.rotation.shape[0] == num_obs
+            ):
                 # Per-peak variation detected. Use per-peak mapping (peak_run_indices = 0..N)
                 static_R_input = self.goniometer.rotation
                 # This will trigger VectorizedObjective's per-peak mode (arange)
@@ -737,7 +593,14 @@ class FindUB:
 
         lattice = self.lattice
         cell_params_init = np.array(
-            [lattice.a, lattice.b, lattice.c, lattice.alpha, lattice.beta, lattice.gamma]
+            [
+                lattice.a,
+                lattice.b,
+                lattice.c,
+                lattice.alpha,
+                lattice.beta,
+                lattice.gamma,
+            ]
         )
         lattice_system, num_lattice_params = get_lattice_system(
             lattice.a,
@@ -1094,3 +957,4 @@ class FindUB:
         )
 
         return num_peaks_soft, np.array(hkl[0]), np.array(lamb[0]), np.array(U)
+
