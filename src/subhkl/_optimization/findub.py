@@ -6,9 +6,12 @@ import scipy.spatial
 from tqdm import trange
 import warnings
 
-from subhkl.io.loader import ExperimentLoader
 from subhkl.core.crystallography import Lattice
+from subhkl.core.experiment import PeaksData, ExperimentData
 from subhkl.core.models import LATTICE_CONFIG
+from subhkl.core.spacegroup import get_centering
+from subhkl.instrument.goniometer import Goniometer
+from subhkl.instrument.detector import scattering_vector_from_angles
 from subhkl._optimization.optimization import (
     VectorizedObjective,
     get_lattice_system,
@@ -18,8 +21,6 @@ from subhkl._optimization.optimization import (
     _inverse_map_param,
 )
 
-from subhkl.instrument.detector import scattering_vector_from_angles
-from subhkl.core.spacegroup import get_centering
 from subhkl.utils.shim import (
     CMA_ES,
     HAS_JAX,
@@ -52,6 +53,10 @@ def require_jax():
 
 class FindUB:
     def __init__(self, data):
+        self.lattice: Lattice
+        self.goniometer: Goniometer
+        self.peaks: PeaksData
+
         for key, value in vars(data).items():
             setattr(self, key, value)
 
