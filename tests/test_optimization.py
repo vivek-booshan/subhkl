@@ -58,9 +58,8 @@ def test_findub_load_from_dict_and_reciprocal_B():
 
 
     # NOTE(vivek): enforce explicit loading of data and passing to FindUB
-    experiment_data = ExperimentLoader.from_dict(data)
-    fu = optimization.FindUB(data=experiment_data)
-    B = fu.lattice.get_b_matrix()
+    experiment = ExperimentLoader.from_dict(data)
+    B = experiment.lattice.get_b_matrix()
     assert B.shape == (3, 3)
 
     # Recompute expected B via metric tensor
