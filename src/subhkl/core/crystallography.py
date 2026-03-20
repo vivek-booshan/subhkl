@@ -98,7 +98,7 @@ def get_q_lab(
     return q_lab
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True)
 class Lattice:
     """
     Represents a crystal lattice and handles transformations between
@@ -113,7 +113,32 @@ class Lattice:
     gamma: float
     system: LatticeSystem = LatticeSystem.TRICLINIC
 
+    def validate(self):
+        if any(p <= 0 for p in (self.a, self.b, self.c)):
+            raise ValueError(
+                f"Lattice cell dimensions must be positive. Got: a={self.a}, b={self.b}, c={self.c}"
+            )
 
+        if not all(0 < ang < 180 for ang in (self.alpha, self.beta, self.gamma)):
+            raise ValueError(
+                f"Lattice angles must be (0, 180). Got: alpha={self.alpha}, beta={self.beta}, gamma={self.gamma}"
+            )
+
+        ar, br, gr = map(np.radians, (self.alpha, self.beta, self.gamma))
+        metric_check = (
+            1
+            - np.cos(ar) ** 2
+            - np.cos(br) ** 2
+            - np.cos(gr) ** 2
+            + 2 * np.cos(ar) * np.cos(br) * np.cos(gr)
+        )
+        if metric_check <= 0:
+            raise ValueError(
+                f"Invalid Lattice angles: The combination of angles ({self.alpha}, {self.beta}, {self.gamma})"
+                "creates a physically impossible (collapsed) volume"
+            )
+
+    # NOTE(vivek): need to make a design decision about this at some point
     @classmethod
     def from_params(cls, params: jnp.ndarray, system: LatticeSystem):
         full_params = LATTICE_CONFIG[system]["reconstruct"](params)
