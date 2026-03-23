@@ -1,4 +1,5 @@
 import os
+import warnings
 
 import h5py
 import matplotlib.pyplot as plt
@@ -80,6 +81,7 @@ def test_mesolite():
     tries = 0
 
     while tries < 5:
+        warnings.warn("what is 48?")
         num, hkl, lamda = opt.minimize(48)
 
         ax[2].imshow(pks.im, norm="log", cmap="binary", origin="lower", extent=extent)
