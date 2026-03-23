@@ -149,8 +149,9 @@ class FindUB:
                 hkl_search_range=hkl_search_range,
                 B_sharpen=B_sharpen,
             )
-        # from ._jax_minimize import _jax_minimize
-        return self._minimize_jax(
+        from ._jax_minimize import _jax_minimize
+        (num_indexed, hkl, lamda, U, x), refined_state = _jax_minimize(
+            state=self.state,
             strategy_name=strategy_name,
             population_size=population_size,
             num_generations=num_generations,
@@ -184,6 +185,14 @@ class FindUB:
             softness=softness,
             B_sharpen=B_sharpen,
         )
+        for field in fields(refined_state):
+            name = field.name
+            value = getattr(refined_state, name)
+            setattr(self, name, value)
+
+        self.x = x
+        self.state = refined_state
+        return num_indexed, hkl, lamda, U
 
     def _minimize_scipy(
         self,
