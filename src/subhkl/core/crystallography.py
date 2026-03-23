@@ -222,16 +222,16 @@ class Lattice:
 
     @staticmethod
     def infer_system(
-        lattice_params,
-        space_group,
+        lattice_cell,
+        space_group: str,
         atol_len=0.05,
         atol_ang=0.5,
         return_type: str = "enum",
     ):
-        if isinstance(lattice_params, Lattice):
-            params = lattice_params.to_numpy()
+        if isinstance(lattice_cell, Lattice):
+            params = lattice_cell.to_numpy()
         else:
-            params = np.asarray(lattice_params)
+            params = np.asarray(lattice_cell)
 
         try:
             from subhkl.core.spacegroup import get_space_group_object
@@ -279,6 +279,6 @@ class Lattice:
             case "enum":
                 return expected, num_params
             case "lattice":
-                return Lattice(*lattice_params, system=expected), num_params
+                return Lattice(*lattice_cell, system=expected), num_params
             case _:
                 raise ValueError(f"Unknown return type: {return_type}")
