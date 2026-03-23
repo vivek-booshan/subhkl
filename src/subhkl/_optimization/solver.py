@@ -73,10 +73,12 @@ class SolverConfig:
 @dataclass(frozen=True, slots=True)
 class UBSolver:
     strategy: str = "cma_es"
-    refinement_cfg: RefinementConfig = field(default_factory=RefinementConfig)
-    indexing_cfg: IndexingConfig = field(default_factory=IndexingConfig)
-    solver_cfg: SolverConfig = field(default_factory=SolverConfig)
 
+    _refinement_cfg: RefinementConfig = field(default_factory=RefinementConfig)
+    _indexing_cfg: IndexingConfig = field(default_factory=IndexingConfig)
+    _solver_cfg: SolverConfig = field(default_factory=SolverConfig)
+
+    # if .calibrate called
     _x0: np.ndarray = None
     _calibrated_state: ExperimentData = None
     """
@@ -129,7 +131,7 @@ class UBSolver:
     ):
         """Configure physical model refinement parameters and boundaries."""
         updates = {k: v for k, v in locals().items() if v is not None and k != "self"}
-        return replace(self, refinement_cfg=replace(self.refinement_cfg, **updates))
+        return replace(self, _refinement_cfg=replace(self._refinement_cfg, **updates))
 
     def indexing_options(
         self,
@@ -148,7 +150,7 @@ class UBSolver:
     ):
         """Configure the mathematical indexing engine and HKL pool generation."""
         updates = {k: v for k, v in locals().items() if v is not None and k != "self"}
-        return replace(self, indexing_cfg=replace(self.indexing_cfg, **updates))
+        return replace(self, _indexing_cfg=replace(self._indexing_cfg, **updates))
 
     def solver_options(
         self,
@@ -162,7 +164,7 @@ class UBSolver:
     ):
         """Configure the evolutionary strategy and JAX execution parameters."""
         updates = {k: v for k, v in locals().items() if v is not None and k != "self"}
-        return replace(self, solver_cfg=replace(self.solver_cfg, **updates))
+        return replace(self, _solver_cfg=replace(self._solver_cfg, **updates))
 
     def search_depth(self, range_hkl: int):
         """Sets the HKL pool size. Use larger values (>30) for large unit cells."""
@@ -196,7 +198,7 @@ class UBSolver:
         if beam is not None:
             updates["refine_beam"] = beam
 
-        return replace(self, refinement_cfg=replace(self.refinement_cfg, **updates))
+        return replace(self, _refinement_cfg=replace(self._refinement_cfg, **updates))
 
     def physical_constraints(
         self, lattice_frac=None, gonio_deg=None, sample_meters=None, beam_deg=None
@@ -211,7 +213,7 @@ class UBSolver:
             updates["sample_bound_meters"] = sample_meters
         if beam_deg is not None:
             updates["beam_bound_deg"] = beam_deg
-        return replace(self, refinement_cfg=replace(self.refinement_cfg, **updates))
+        return replace(self, _refinement_cfg=replace(self._refinement_cfg, **updates))
 
     def set(self, **kwargs):
         """Generic method to modify any arbitrary internal kwarg."""
@@ -237,15 +239,15 @@ class UBSolver:
         return replace(
             self,
             strategy=strategy,
-            refinement_cfg=RefinementConfig(**r_up) if r_up else self.refinement_cfg,
-            indexing_cfg=IndexingConfig(**i_up) if i_up else self.indexing_cfg,
-            solver_cfg=SolverConfig(**s_up) if s_up else self.solver_cfg,
+            _refinement_cfg=RefinementConfig(**r_up) if r_up else self._refinement_cfg,
+            _indexing_cfg=IndexingConfig(**i_up) if i_up else self._indexing_cfg,
+            _solver_cfg=SolverConfig(**s_up) if s_up else self._solver_cfg,
         )
 
     def calibrate(self, state: ExperimentData, filename: str):
         import subhkl._optimization.calibrate as cal
 
-        x0, calibrated_state = cal(state, filename, **asdict(self.refinement_cfg))
+        x0, calibrated_state = cal(state, filename, **asdict(self._refinement_cfg))
         return replace(self, _x0=x0, _calibrated_state=calibrated_state)
 
     # NOTE(vivek): let minimizer just directly take the args. Check if goniometer_* is just state.goniometer.*
@@ -285,9 +287,9 @@ class UBSolver:
             )
             x0 = None
 
-        rcfg = self.refinement_cfg
-        icfg = self.indexing_cfg
-        scfg = self.solver_cfg
+        rcfg = self._refinement_cfg
+        icfg = self._indexing_cfg
+        scfg = self._solver_cfg
 
         from ._jax_minimize import _jax_minimize
 
