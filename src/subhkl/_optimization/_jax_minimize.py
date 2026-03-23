@@ -28,11 +28,8 @@ def _jax_minimize(
     init_params: Optional[np.ndarray] = None,
     refine_lattice: bool = False,
     lattice_bound_frac: float = 0.05,
-    goniometer_axes: Optional[List[str]] = None,
-    goniometer_angles: Optional[np.ndarray] = None,
     refine_goniometer: bool = False,
     goniometer_bound_deg: float = 5.0,
-    goniometer_names: Optional[List[str]] = None,
     refine_goniometer_axes: Optional[List[str]] = None,
     refine_sample: bool = False,
     sample_bound_meters: float = 2.0,
@@ -59,17 +56,9 @@ def _jax_minimize(
         "sample": refine_sample
     }
 
-    goniometer_axes = (
-        goniometer_axes if goniometer_axes is not None else state.goniometer.axes
-    )
-    goniometer_names = (
-        goniometer_names if goniometer_names is not None else state.goniometer.names
-    )
-    goniometer_angles = (
-        goniometer_angles
-        if goniometer_angles is not None
-        else (state.goniometer.angles.T if state.goniometer.angles is not None else None)
-    )
+    goniometer_axes = state.goniometer.axes
+    goniometer_names = state.goniometer.names
+    goniometer_angles = state.goniometer.angles.T if state.goniometer.angles is not None else None
 
     kf_ki_dir_lab = scattering_vector_from_angles(state.peaks.two_theta, state.peaks.azimuthal)
     num_obs = kf_ki_dir_lab.shape[1]
@@ -111,6 +100,48 @@ def _jax_minimize(
         raise ValueError(
             "Need to supply --d_min and --d_max for loss_method=='forward'"
         )
+
+    has_xyz = state.peaks.xyz is not None
+    refine_sample = refine_sample and has_xyz
+    refine_beam = refine_beam and has_xyz
+
+    num_dims = 3
+    num_dims += num_lattice_params if refine_lattice else 0
+    num_dims += 3 if refine_sample else 0
+    num_dims += 2 if refine_beam else 0
+
+    if refine_goniometer:
+        num_dims += int(np.sum(goniometer_refine_mask)) if goniometer_refine_mask is not None else len(goniometer_axes)
+
+
+    start_sol_processed = None
+    if init_params is not None:
+        start_sol = jnp.array(init_params)
+        n_current = start_sol.shape[0]
+
+        if n_current < num_dims:
+            padding = jnp.full((num_dims - n_current, ), 0.5)
+            start_sol_processed = jnp.concatenate([start_sol, padding])
+        else:
+            start_sol_processed = start_sol[:num_dims]
+
+    sample_solution = jnp.zeros(num_dims)
+    target_sigma = sigma_init or (0.01 if start_sol_processed is not None else 3.14)
+    print(f"Strategy: {strategy_name.upper()} | Target Sigma: {target_sigma}")
+
+    if strategy_name.lower() == "de":
+        strategy = DE(solution=sample_solution, population_size=population_size)
+        strategy_type = "population_based"
+    elif strategy_name.lower() == "pso":
+        strategy = PSO(solution=sample_solution, population_size=population_size)
+        strategy_type = "population_based"
+    elif strategy_name.lower() == "cma_es":
+        strategy = CMA_ES(solution=sample_solution, population_size=population_size)
+        strategy_type = "distribution_based"
+    else:
+        raise ValueError(f"Unknown strategy: {strategy_name}")
+
+    es_params = strategy.default_params
 
     t_arr = np.linspace(0, np.pi, 1024)
     angle_cdf = (t_arr - np.sin(t_arr)) / np.pi
@@ -160,47 +191,6 @@ def _jax_minimize(
         f"Objective initialized with {loss_method} loss. Tolerance: {tolerance_deg} deg"
     )
 
-    has_xyz = state.peaks.xyz is not None
-    refine_sample = refine_sample and has_xyz
-    refine_beam = refine_beam and has_xyz
-
-    num_dims = 3
-    num_dims += num_lattice_params if refine_lattice else 0
-    num_dims += 3 if refine_sample else 0
-    num_dims += 2 if refine_beam else 0
-
-    if refine_goniometer:
-        num_dims += int(np.sum(goniometer_refine_mask)) if goniometer_refine_mask is not None else len(goniometer_axes)
-
-
-    start_sol_processed = None
-    if init_params is not None:
-        start_sol = jnp.array(init_params)
-        n_current = start_sol.shape[0]
-
-        if n_current < num_dims:
-            padding = jnp.full((num_dims - n_current, ), 0.5)
-            start_sol_processed = jnp.concatenate([start_sol, padding])
-        else:
-            start_sol_processed = start_sol[:num_dims]
-
-    sample_solution = jnp.zeros(num_dims)
-    target_sigma = sigma_init or (0.01 if start_sol_processed is not None else 3.14)
-    print(f"Strategy: {strategy_name.upper()} | Target Sigma: {target_sigma}")
-
-    if strategy_name.lower() == "de":
-        strategy = DE(solution=sample_solution, population_size=population_size)
-        strategy_type = "population_based"
-    elif strategy_name.lower() == "pso":
-        strategy = PSO(solution=sample_solution, population_size=population_size)
-        strategy_type = "population_based"
-    elif strategy_name.lower() == "cma_es":
-        strategy = CMA_ES(solution=sample_solution, population_size=population_size)
-        strategy_type = "distribution_based"
-    else:
-        raise ValueError(f"Unknown strategy: {strategy_name}")
-
-    es_params = strategy.default_params
 
     def init_single_run(rng, start_sol):
         rng, rng_pop, rng_init = jax.random.split(rng, 3)
