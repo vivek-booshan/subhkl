@@ -9,7 +9,7 @@ from jax.sharding import PartitionSpec as P
 import numpy as np
 from scipy.optimize import minimize as scipy_minimize
 
-from ._scipy_minimize import Result
+from subhkl._optimization.solver import Result
 from subhkl.core.experiment import ExperimentData
 from subhkl.core.crystallography import Lattice
 from subhkl.core.spacegroup import get_centering
@@ -383,8 +383,10 @@ def _jax_minimize(
         wavelengths=lamda_final,
         U=np.array(U),
         x=best_overall_member,
+        state=refined_state
     )
-    return result, refined_state
+
+    return result
 
 def _resolve_goniometer_mapping(state: ExperimentData, num_obs: int, goniometer_angles: Optional[np.ndarray]):
     run_indices = state.run_indices

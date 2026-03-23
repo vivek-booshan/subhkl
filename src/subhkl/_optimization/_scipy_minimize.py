@@ -1,4 +1,4 @@
-from dataclasses import dataclass, replace, astuple
+from dataclasses import replace 
 from typing import Optional, List
 
 import numpy as np
@@ -10,18 +10,7 @@ from subhkl.core.spacegroup import get_centering
 from subhkl.instrument.detector import scattering_vector_from_angles
 from subhkl._optimization.optimization import VectorizedObjective 
 
-
-@dataclass(frozen=True, slots=True)
-class Result:
-    num_indexed: int
-    hkl: np.ndarray
-    wavelengths: np.ndarray
-    U: np.ndarray
-    x: np.ndarray
-
-    def __iter__(self):
-        return iter(astuple(self))
-
+from subhkl._optimization.solver import Result
 
 def _minimize_scipy(
     state: ExperimentData,
@@ -61,7 +50,7 @@ def _minimize_scipy(
 
     lattice_system = state.lattice.system
     num_lattice_params = LATTICE_CONFIG[lattice_system]["num_params"]
-    lattice_system_str = LATTICE_CONFIG[lattice_system]["name"]
+    # lattice_system_str = LATTICE_CONFIG[lattice_system]["name"]
 
     print(f"Lattice System: {lattice_system} ({num_lattice_params} free params)")
 
@@ -116,7 +105,7 @@ def _minimize_scipy(
         ],
         refine_lattice=refine_lattice,
         lattice_bound_frac=lattice_bound_frac,
-        lattice_system=lattice_system_str,  # resolve to actual enum usage
+        lattice_system=state.lattice.system.name.capitalize(),  # resolve to actual enum usage
         goniometer_axes=gonio.axes,
         goniometer_angles=gonio.angles.T if gonio.angles is not None else None,
         refine_goniometer=refine_goniometer,
@@ -220,8 +209,8 @@ def _minimize_scipy(
 
     U_final = np.array(_rotation_matrix_from_rodrigues_numpy(final_x[:3]))
 
-    result = Result(num_indexed, hkl_final, lamda_final, U_final, final_x)
-    return result, refined_state
+    result = Result(num_indexed, hkl_final, lamda_final, U_final, final_x, state)
+    return result
 
 
 def _rotation_matrix_from_rodrigues_numpy(w):
