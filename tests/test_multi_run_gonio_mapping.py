@@ -1,7 +1,6 @@
 import numpy as np
 
-from subhkl.optimization import FindUB
-
+from subhkl.io.loader import ExperimentLoader
 
 def test_multi_run_mapping_fix_via_minimize():
     # Scenario: 2 images, 2 peaks per image = 4 peaks total.
@@ -22,7 +21,7 @@ def test_multi_run_mapping_fix_via_minimize():
         "sample/space_group": "P 1",
         "instrument/wavelength": [1.0, 2.0],
         "goniometer/R": np.tile(
-            np.eye(3)[None], (4, 1, 1)
+            np.eye(3)[None], (2, 1, 1)
         ),  # Not really used if axes/angles provided
         "peaks/two_theta": np.array([10.0, 20.0, 30.0, 40.0]),
         "peaks/azimuthal": np.array([0.0, 0.0, 0.0, 0.0]),
@@ -40,7 +39,7 @@ def test_multi_run_mapping_fix_via_minimize():
         "beam/ki_vec": np.array([0.0, 0.0, 1.0]),
     }
 
-    ub = FindUB(data=data)
+    ub = ExperimentLoader.from_dict(data)
 
     # We want to check if minimize() correctly reduces goniometer_angles to per-run
     # We can mock VectorizedObjective or just check the logic by calling a minimal minimize
@@ -55,7 +54,7 @@ def test_multi_run_mapping_fix_via_minimize():
     # But if we use the same logic as minimize() in our test:
 
     num_obs = 4
-    goniometer_angles = ub.goniometer_angles
+    goniometer_angles = ub.goniometer.angles
     run_indices = ub.run_indices
 
     if run_indices is not None:
