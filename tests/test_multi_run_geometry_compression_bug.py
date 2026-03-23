@@ -1,5 +1,6 @@
 import numpy as np
 import h5py
+from subhkl.core import Lattice
 from subhkl.io.parser import indexer
 from subhkl.instrument.metrics import compute_metrics
 
@@ -42,12 +43,7 @@ def test_multi_run_geometry_compression_reproduction(tmp_path):
         ]
     )
 
-    from subhkl.optimization import FindUB
-
-    fu_helper = FindUB()
-    fu_helper.a, fu_helper.b, fu_helper.c = a, b, c
-    fu_helper.alpha, fu_helper.beta, fu_helper.gamma = alpha, beta, gamma
-    B = fu_helper.reciprocal_lattice_B()
+    B = Lattice(a, b, c, alpha, beta, gamma).get_b_matrix()
 
     xyz = []
     run_indices = []

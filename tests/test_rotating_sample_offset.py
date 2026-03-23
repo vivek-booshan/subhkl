@@ -1,6 +1,10 @@
+from dataclasses import replace
 import numpy as np
 
-from subhkl.optimization import FindUB
+from subhkl.io.loader import ExperimentLoader
+from subhkl._optimization import UBSolver
+
+# from subhkl.optimization import FindUB
 
 
 def test_rotating_sample_offset():
@@ -75,21 +79,18 @@ def test_rotating_sample_offset():
         "goniometer/angles": gonio_angles.T,
     }
 
-    fu = FindUB(data=data)
-    fu.base_sample_offset = sample_offset_sample_frame
+    experiment = ExperimentLoader.from_dict(data)
+    experiment = replace(experiment, base_sample_offset=sample_offset_sample_frame)
 
     # 4. Run Indexer (Stage 2 style: refine_sample=False)
     print("\n--- Running Indexer with Rotating Sample Offset ---")
-    score, hkl, lam, U = fu.minimize(
-        strategy_name="DE",
-        population_size=100,
-        num_generations=50,
-        tolerance_deg=0.1,
-        refine_sample=False,
-        refine_goniometer=False,
-        hkl_search_range=15,
+    result = (UBSolver()
+        .with_strategy("DE", 100, 50)
+        .indexing_options(tolerance_deg=0.1, hkl_search_range=15)
+        .solve(experiment)
     )
 
+    score = result.num_indexed
     print(f"Best Score: {score:.2f}/2.0")
     if score < 1.9:
         print("FAILURE: Indexer could not find the solution.")

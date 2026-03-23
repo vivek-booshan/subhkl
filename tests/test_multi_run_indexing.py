@@ -4,7 +4,7 @@ from scipy.spatial.transform import Rotation
 
 from subhkl.io.loader import ExperimentLoader
 from subhkl.core import Lattice
-from subhkl._optimization import FindUB, VectorizedObjective
+from subhkl._optimization import UBSolver, VectorizedObjective
 
 
 def generate_synthetic_data(
@@ -96,17 +96,16 @@ def test_multi_run_indexing_refinement():
     rotations = [[0.0], [45.0]]
     data = generate_synthetic_data(a, b, c, 90, 90, 90, U_true, rotations, gonio_axes)
     experiment = ExperimentLoader.from_dict(data)
-    num_peaks, hkl_res, lam_res, U_res = FindUB(experiment).minimize(
-        strategy_name="DE",
-        population_size=200,
-        num_generations=100,
-        n_runs=1,
-        init_params=Rotation.from_matrix(U_true).as_rotvec(),
-        sigma_init=0.001,
-        tolerance_deg=0.1,
-        loss_method="gaussian",
+    result = (UBSolver()
+        .with_strategy("DE", 200, 100)
+        .indexing_options(loss_method="gaussian", tolerance_deg=0.1)
+        .solver_options(sigma_init=0.001, n_runs=1)
+        .solve(
+               experiment,
+               init_params=Rotation.from_matrix(U_true).as_rotvec()
+           )
     )
-    diff_R = U_res @ U_true.T
+    diff_R = result.U @ U_true.T
     angle = np.rad2deg(np.arccos(np.clip((np.trace(diff_R) - 1) / 2, -1, 1)))
     assert angle < 0.2
 
@@ -162,21 +161,15 @@ def test_sample_offset_refinement_multirun():
         gonio_axes,
         sample_offset_true=s_true,
     )
-    experiment =ExperimentLoader().from_dict(data)
-    fu = FindUB(data=experiment)
-    num_peaks, hkl_res, lam_res, U_res = fu.minimize(
-        strategy_name="DE",
-        population_size=100,
-        num_generations=500,
-        n_runs=1,
-        init_params=np.zeros(3),
-        sigma_init=None,
-        refine_sample=True,
-        sample_bound_meters=0.005,
-        tolerance_deg=0.1,
-        loss_method="gaussian",
+    experiment = ExperimentLoader().from_dict(data)
+    result = (UBSolver()
+        .with_strategy("DE", 100, 500)
+        .refinement_options(refine_sample=True, sample_bound_meters=0.005)
+        .indexing_options(tolerance_deg=0.1, loss_method="gaussian")
+        .solve(experiment)
     )
-    recovered_s = fu.sample_offset
+
+    recovered_s = result.state.sample_offset
     error = np.linalg.norm(recovered_s - s_true)
     assert error < 1e-2
 
@@ -214,12 +207,10 @@ def test_predictor_multirun_sample_rotation():
 
 
 def test_ghost_indexing_vulnerability():
-    from subhkl.optimization import FindUB, VectorizedObjective
 
-    fu = FindUB()
-    fu.a, fu.b, fu.c = 10, 10, 10
-    fu.alpha, fu.beta, fu.gamma = 90, 90, 90
-    B = fu.reciprocal_lattice_B()
+    a, b, c = 10, 10, 10
+    alpha, beta, gamma = 90, 90, 90
+    B = Lattice(a, b, c, alpha, beta, gamma).get_b_matrix()
     obj = VectorizedObjective(
         B=B,
         kf_ki_dir=np.zeros((3, 1)),
@@ -247,8 +238,6 @@ def test_ghost_indexing_vulnerability():
 
 
 def test_stage1_blindness_vulnerability():
-    from subhkl.optimization import VectorizedObjective
-
     B = np.eye(3)
     xyz_lab = np.array([[0.0, 0.0, 0.4]])
     s_nom = np.array([0.01, 0.0, 0.0])
@@ -271,8 +260,6 @@ def test_stage1_blindness_vulnerability():
 def test_multirun_peaks_per_image_vulnerability():
     """Verify if Indexer crashes or miscalculates when multiple peaks belong to the same run."""
     import numpy as np
-
-    from subhkl.optimization import VectorizedObjective
 
     num_runs = 2
     peaks_per_run = 5

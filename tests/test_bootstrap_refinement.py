@@ -38,10 +38,6 @@ def test_u_absorbs_gonio_offset(tmp_path):
     hkls = np.stack([h.flatten(), k.flatten(), l.flatten()], axis=1)
     hkls = hkls[np.linalg.norm(hkls, axis=1) > 0]
 
-    # NOTE(vivek): can't create class with no argument anymore, use lattice to get matrix
-    # fu_helper = FindUB()
-    # fu_helper.a, fu_helper.b, fu_helper.c = a, b, c
-    # fu_helper.alpha, fu_helper.beta, fu_helper.gamma = alpha, beta, gamma
     B = Lattice(a, b, c, alpha, beta, gamma).get_b_matrix()
 
     RUB_true = R_true @ U_true @ B
