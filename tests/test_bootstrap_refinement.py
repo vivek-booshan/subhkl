@@ -1,12 +1,13 @@
 import h5py
 import numpy as np
 
-from subhkl._optimization import calibrate, FindUB
+# from subhkl.optimization import FindUB
+from subhkl._optimization import UBSolver
+from subhkl._optimization import calibrate
 from subhkl.core import Lattice
 from subhkl.io.loader import ExperimentLoader
 
 
-# from subhkl.optimization import FindUB
 
 def test_u_absorbs_gonio_offset(tmp_path):
     """
@@ -89,20 +90,16 @@ def test_u_absorbs_gonio_offset(tmp_path):
     }
 
     experiment = ExperimentLoader.from_dict(data)
-    fu = FindUB(data=experiment)
-    # --- Run 1: WITH goniometer refinement ---
-    num_indexed, hkl, lamda, U = fu.minimize(
-        strategy_name="DE",
-        population_size=500,
-        num_generations=150,
-        tolerance_deg=0.5,
-        loss_method="gaussian",
-        refine_lattice=False,
-        refine_goniometer=True,
-        goniometer_bound_deg=5.0,
+    result = (UBSolver()
+        .with_strategy("DE", 500, 150)
+        .refine(False, True)
+        .physical_constraints(gonio_deg=5.0)
+        .indexing_options(tolerance_deg=0.5, loss_method="gaussian")
+        .solve(experiment)
     )
 
     # Save to a temp file to simulate bootstrap
+    fu = result.state
     bootstrap_file = tmp_path / "stage1_test.h5"
     with h5py.File(bootstrap_file, "w") as f:
         f["sample/a"] = a
@@ -112,18 +109,16 @@ def test_u_absorbs_gonio_offset(tmp_path):
         f["sample/beta"] = beta
         f["sample/gamma"] = gamma
         f["sample/space_group"] = space_group
-        f["sample/U"] = U
+        f["sample/U"] = result.U
         f["sample/B"] = fu.lattice.get_b_matrix()
         f["goniometer/R"] = fu.goniometer.rotation
         f["optimization/goniometer_offsets"] = fu.goniometer.offsets
-        f["optimization/best_params"] = fu.x
+        f["optimization/best_params"] = result.x
         f["beam/ki_vec"] = fu.ki_vec
         f["instrument/wavelength"] = [1.0, 8.5]
 
     # --- Run 2: WITHOUT goniometer refinement (BOOTSTRAP) ---
-    _, fu2 = calibrate(
-        experiment, str(bootstrap_file), refine_lattice=False, refine_goniometer=False
-    )
+    _, fu2 = calibrate(experiment, str(bootstrap_file))
 
     # VERIFY PERSISTENCE (THE CORE FIX)
     assert np.allclose(fu2.goniometer.base_offsets, fu.goniometer.offsets)
