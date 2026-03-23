@@ -296,9 +296,7 @@ class UBSolver:
         result = _jax_minimize(
             state=target_state,
             init_params=x0,
-            goniometer_axes=goniometer_axes,
-            goniometer_angles=goniometer_angles,
-            goniometer_names=goniometer_names,
+
             # refinement
             refine_lattice=rcfg.refine_lattice,
             lattice_bound_frac=rcfg.lattice_bound_frac,
@@ -309,6 +307,7 @@ class UBSolver:
             sample_bound_meters=rcfg.sample_bound_meters,
             refine_beam=rcfg.refine_beam,
             beam_bound_deg=rcfg.beam_bound_deg,
+
             # indexing
             d_min=icfg.d_min,
             d_max=icfg.d_max,
@@ -322,6 +321,7 @@ class UBSolver:
             top_k=icfg.top_k,
             softness=icfg.softness,
             B_sharpen=icfg.B_sharpen,
+
             # solver
             strategy_name=scfg.strategy_name,
             population_size=scfg.population_size,
