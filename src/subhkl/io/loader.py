@@ -217,26 +217,23 @@ class ExperimentLoader:
 
     @staticmethod
     def _resolve_run_indices(data: dict) -> np.ndarray:
-        """Handles the logic of matching peaks to rotation matrices/runs."""
         r_stack = data.get("goniometer/R")
         idx_run = data.get("peaks/run_index")
         idx_img = data.get("peaks/image_index")
         idx_bank = data.get("bank", data.get("bank_ids"))
 
-        # Preference hierarchy for peak grouping
+
         if r_stack is not None and r_stack.ndim == 3:
             num_rot = r_stack.shape[0]
+        
             for candidate in [idx_run, idx_img, idx_bank]:
-                if candidate is not None and int(np.max(candidate)) + 1 == num_rot:
-                    return candidate
+                if candidate is not None:
+                    if (int(np.max(candidate)) + 1) == num_rot:
+                        return candidate
+        
+        for fallback in [idx_run, idx_img, idx_bank]:
+            if fallback is not None:
+                return fallback
 
-        if idx_run is not None:
-            return idx_run
-        if idx_img is not None:
-            return idx_img
-        if idx_bank is not None:
-            return idx_bank
-
-        # Fallback: single run for all peaks
         num_peaks = len(data["peaks/two_theta"])
         return np.zeros(num_peaks, dtype=int)
