@@ -155,39 +155,8 @@ def _jax_minimize(
                 f"Goniometer Mask: {goniometer_refine_mask} (Names: {state.goniometer.names})"
             )
 
-    snr = state.peaks.intensity / (state.peaks.sigma + 1e-6)
-
-    if B_sharpen is not None:
-        theta_rad = np.deg2rad(state.peaks.two_theta) / 2.0
-        sin_sq_theta = np.sin(theta_rad) ** 2
-        wilson_correction = np.exp(B_sharpen * sin_sq_theta)
-        weights = snr * wilson_correction
-        weights = weights / np.mean(weights)
-    else:
-        weights = snr
-
-    weights = np.clip(weights, 0, 10.0)
-
-    lattice = state.lattice
-    cell_params_init = np.array(
-        [
-            lattice.a,
-            lattice.b,
-            lattice.c,
-            lattice.alpha,
-            lattice.beta,
-            lattice.gamma,
-        ]
-    )
-    lattice_system, num_lattice_params = get_lattice_system(
-        lattice.a,
-        lattice.b,
-        lattice.c,
-        lattice.alpha,
-        lattice.beta,
-        lattice.gamma,
-        state.space_group,
-    )
+    weights = state.peaks.refine_weights(B_sharpen)
+    lattice_system, num_lattice_params = Lattice.infer_system(state.lattice, state.space_group)
 
     if refine_lattice:
         print("Lattice Refinement Enabled.")
@@ -212,7 +181,7 @@ def _jax_minimize(
         space_group=state.space_group,
         centering=get_centering(state.space_group),
         loss_method=loss_method,
-        cell_params=cell_params_init,
+        cell_params=state.lattice.to_numpy(),
         peak_radii=state.peaks.radius,
         refine_lattice=refine_lattice,
         lattice_bound_frac=lattice_bound_frac,
