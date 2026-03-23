@@ -37,6 +37,11 @@ def require_jax():
 # NOTE(vivek): switch to builder api
 class FindUB:
     def __init__(self, data: ExperimentData):
+        warnings.warn(
+            "subhkl.optimization.FindUB deprecated, use subhkl.optimization.Solver",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
         self.state = data
         self.lattice: Lattice
         self.goniometer: Goniometer
