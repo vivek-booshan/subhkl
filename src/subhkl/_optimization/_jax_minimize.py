@@ -1,28 +1,20 @@
 from typing import Optional, List, Tuple
 from dataclasses import replace
+
+from evosax.algorithms import CMA_ES, PSO, DifferentialEvolution as DE
+import jax
+import jax.numpy as jnp
+from jax.sharding import Mesh, NamedSharding
+from jax.sharding import PartitionSpec as P
 import numpy as np
 from scipy.optimize import minimize as scipy_minimize
 
+from ._scipy_minimize import Result
 from subhkl.core.experiment import ExperimentData
 from subhkl.core.crystallography import Lattice
 from subhkl.core.spacegroup import get_centering
 from subhkl.instrument.detector import scattering_vector_from_angles
 from subhkl._optimization.optimization import VectorizedObjective
-
-# Import the Result dataclass unified with the SciPy method
-from ._scipy_minimize import Result
-
-from subhkl.utils.shim import (
-    CMA_ES,
-    DifferentialEvolution as DE,
-    PSO,
-    Mesh,
-    NamedSharding,
-    P,
-    jax,
-    jnp,
-)
-
 
 def _jax_minimize(
     state: ExperimentData,
