@@ -1,7 +1,6 @@
 import h5py
 import numpy as np
 
-# from subhkl.optimization import FindUB
 from subhkl._optimization import UBSolver
 from subhkl._optimization import calibrate
 from subhkl.core import Lattice

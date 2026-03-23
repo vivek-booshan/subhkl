@@ -4,9 +4,6 @@ import numpy as np
 from subhkl.io.loader import ExperimentLoader
 from subhkl._optimization import UBSolver
 
-# from subhkl.optimization import FindUB
-
-
 def test_rotating_sample_offset():
     # 1. Physical Parameters
     a, b, c = 10.0, 10.0, 10.0
