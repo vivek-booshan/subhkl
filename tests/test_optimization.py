@@ -3,6 +3,7 @@ import pytest
 import scipy.linalg
 
 from subhkl.io.loader import ExperimentLoader
+from subhkl.core import Lattice
 from subhkl._optimization import findub as optimization 
 # from subhkl import optimization
 
@@ -31,8 +32,10 @@ def test_param_mapping_roundtrip():
 
 
 def test_get_lattice_system_simple_cubic():
-    final, num = optimization.get_lattice_system(
-        10.0, 10.0, 10.0, 90.0, 90.0, 90.0, "P 4 3 2"
+    final, num = Lattice.infer_system(
+        (10.0, 10.0, 10.0, 90.0, 90.0, 90.0),
+        "P 4 3 2",
+        return_type="str"
     )
     assert final == "Cubic"
     assert num == 1
