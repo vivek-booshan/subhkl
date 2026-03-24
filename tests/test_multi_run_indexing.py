@@ -5,6 +5,7 @@ from scipy.spatial.transform import Rotation
 from subhkl.io.loader import ExperimentLoader
 from subhkl.core import Lattice
 from subhkl._optimization import UBSolver, VectorizedObjective
+from subhkl._optimization.solver import RefinementConfig,IndexingConfig
 
 
 def generate_synthetic_data(
@@ -122,7 +123,7 @@ def test_clipping_logic_direct():
         angle_cdf=np.zeros(4),
         angle_t=np.zeros(4),
         space_group="P 1 21 1",
-        hkl_search_range=2,
+        icfg=IndexingConfig(hkl_search_range=2)
     )
     h = np.array([0, 0, 0, 0])
     k = np.array([1, 2, 3, 4])
@@ -219,7 +220,7 @@ def test_ghost_indexing_vulnerability():
         angle_cdf=np.zeros(10),
         angle_t=np.zeros(10),
         space_group="I 2 2 2",
-        hkl_search_range=2,
+        icfg=IndexingConfig(hkl_search_range=2),
     )
     h_out, k_out, l_out = np.array([21]), np.array([0]), np.array([0])
     r = obj.mask_range
@@ -248,7 +249,7 @@ def test_stage1_blindness_vulnerability():
         wavelength=[1, 2],
         angle_cdf=np.zeros(10),
         angle_t=np.zeros(10),
-        refine_sample=False,
+        rcfg=RefinementConfig(refine_sample=True),
         sample_nominal=s_nom,
     )
     kf_internal = obj.kf_lab_fixed

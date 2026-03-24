@@ -1,19 +1,19 @@
 import warnings
 from functools import partial
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 
 from subhkl.core.math import rotation_from_axis_angle, rotation_from_rodrigues
 from subhkl.core.crystallography import LatticeSOA
 from subhkl.core.spacegroup import generate_hkl_mask
-
-# Import JAX with fallback from utils (centralized)
 from subhkl.utils.shim import (
     HAS_JAX,
     OPTIMIZATION_BACKEND,
-    jax,
-    jnp,
 )
+
+from .solver import RefinementConfig, IndexingConfig
 
 def update_add(arr, idx, val):
     return arr.at[idx].add(val)
@@ -91,33 +91,21 @@ class VectorizedObjective:
         angle_cdf,
         angle_t,
         weights=None,
-        tolerance_deg=0.1,
         cell_params=None,
-        refine_lattice=False,
-        lattice_bound_frac=0.05,
+
+        rcfg: RefinementConfig=RefinementConfig(),
+        icfg: IndexingConfig=IndexingConfig(),
+
         lattice_system="Triclinic",
         goniometer_axes=None,
         goniometer_angles=None,
-        refine_goniometer=False,
-        goniometer_bound_deg=5.0,
         goniometer_refine_mask=None,
         goniometer_nominal_offsets=None,
-        refine_sample=False,
-        sample_bound_meters=0.002,
         sample_nominal=None,
-        refine_beam=False,
-        beam_bound_deg=1.0,
         beam_nominal=None,
         peak_radii=None,
-        loss_method="gaussian",
-        hkl_search_range=15,
-        d_min=None,
-        d_max=100.0,
-        search_window_size=256,
-        window_batch_size=32,
-        chunk_size=4096,
-        num_iters=20,
-        top_k=32,
+
+
         space_group="P 1",
         centering="P",
         static_R=None,
@@ -136,7 +124,7 @@ class VectorizedObjective:
         self.centering = centering
 
         # Convert tolerance from degrees to radians
-        self.tolerance_rad = jnp.deg2rad(tolerance_deg)
+        self.tolerance_rad = jnp.deg2rad(icfg.tolerance_deg)
 
         # FIX: Handle Static Rotation (R) correctly
         if static_R is not None:
@@ -186,15 +174,15 @@ class VectorizedObjective:
         else:
             self.peak_xyz = None
 
-        self.refine_sample = refine_sample
-        self.sample_bound = sample_bound_meters
+        self.refine_sample = rcfg.refine_sample
+        self.sample_bound = rcfg.sample_bound_meters
         if sample_nominal is None:
             self.sample_nominal = jnp.zeros(3)
         else:
             self.sample_nominal = jnp.array(sample_nominal)
 
-        self.refine_beam = refine_beam
-        self.beam_bound_deg = beam_bound_deg
+        self.refine_beam = rcfg.refine_beam
+        self.beam_bound_deg = rcfg.beam_bound_deg
         if beam_nominal is None:
             self.beam_nominal = jnp.array([0.0, 0.0, 1.0])
         else:
@@ -233,17 +221,17 @@ class VectorizedObjective:
             # We must ensure the optimizer
             # applies the Lab -> Sample rotation (R^T) during objective evaluation.
 
-        self.tolerance_deg = tolerance_deg
-        self.loss_method = loss_method
+        self.tolerance_deg = icfg.tolerance_deg
+        self.loss_method = icfg.loss_method
         self.angle_cdf = jnp.array(angle_cdf)
         self.angle_t = jnp.array(angle_t)
         self.space_group = space_group
 
-        self.refine_lattice = refine_lattice
+        self.refine_lattice = rcfg.refine_lattice
         self.lattice_system = lattice_system
-        self.lattice_bound_frac = lattice_bound_frac
-        self.refine_goniometer = refine_goniometer
-        self.goniometer_bound_deg = goniometer_bound_deg
+        self.lattice_bound_frac = rcfg.lattice_bound_frac
+        self.refine_goniometer = rcfg.refine_goniometer
+        self.goniometer_bound_deg = rcfg.goniometer_bound_deg
 
         if self.refine_lattice:
             if cell_params is None:
@@ -310,8 +298,8 @@ class VectorizedObjective:
             else:
                 self.gonio_nominal_offsets = jnp.array(goniometer_nominal_offsets)
 
-            self.gonio_min = jnp.full(self.num_gonio_axes, -goniometer_bound_deg)
-            self.gonio_max = jnp.full(self.num_gonio_axes, goniometer_bound_deg)
+            self.gonio_min = jnp.full(self.num_gonio_axes, -rcfg.goniometer_bound_deg)
+            self.gonio_max = jnp.full(self.num_gonio_axes, rcfg.goniometer_bound_deg)
         else:
             self.gonio_axes = None
             self.num_gonio_axes = 0
@@ -340,14 +328,14 @@ class VectorizedObjective:
                 )
 
         self.max_score = jnp.sum(self.weights)
-        self.d_min = d_min if d_min is not None else 0.0
-        self.d_max = d_max if d_max is not None else 1000.0
-        self.search_window_size = search_window_size
-        self.window_batch_size = window_batch_size
+        self.d_min = icfg.d_min if icfg.d_min is not None else 0.0
+        self.d_max = icfg.d_max if icfg.d_max is not None else 1000.0
+        self.search_window_size = icfg.search_window_size
+        self.window_batch_size = icfg.window_batch_size
 
-        self.chunk_size = chunk_size
-        self.num_iters = num_iters
-        self.top_k = top_k
+        self.chunk_size = icfg.chunk_size
+        self.num_iters = icfg.num_iters
+        self.top_k = icfg.top_k
 
         # --- Search Window Heuristic Warning ---
         if self.loss_method == "forward":
@@ -388,9 +376,9 @@ class VectorizedObjective:
         h_max_res = int(jnp.ceil(a_real / d_limit))
         k_max_res = int(jnp.ceil(b_real / d_limit))
         l_max_res = int(jnp.ceil(c_real / d_limit))
-        h_max = max(hkl_search_range, h_max_res)
-        k_max = max(hkl_search_range, k_max_res)
-        l_max = max(hkl_search_range, l_max_res)
+        h_max = max(icfg.hkl_search_range, h_max_res)
+        k_max = max(icfg.hkl_search_range, k_max_res)
+        l_max = max(icfg.hkl_search_range, l_max_res)
 
         # Clamp to a reasonable maximum to prevent OOM
         h_max = min(h_max, 64)
@@ -450,7 +438,7 @@ class VectorizedObjective:
 
         # Reference Pool Norms for Sinkhorn
         # Use padded pool to match chunked indexing in sinkhorn
-        pad_len = (chunk_size - (hkl_pool.shape[1] % chunk_size)) % chunk_size
+        pad_len = (icfg.chunk_size - (hkl_pool.shape[1] % icfg.chunk_size)) % icfg.chunk_size
         hkl_pool_padded = (
             jnp.pad(hkl_pool, ((0, 0), (0, pad_len)), constant_values=0)
             if pad_len > 0

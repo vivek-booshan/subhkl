@@ -140,48 +140,31 @@ def _jax_minimize(
     obj_rcfg = replace(
         rcfg, refine_sample=refine_sample_and_xyz, refine_beam=refine_beam_and_xyz
     )
-    obj_goniometer = replace(state.goniometer, angles=goniometer_angles)
     objective = VectorizedObjective(
         state.lattice.get_b_matrix(),
         kf_ki_input,
-        state.peaks.xyz,
-        np.array(state.wavelength),
-        angle_cdf,
-        angle_t,
+        angle_cdf=angle_cdf,
+        angle_t=angle_t,
+
+        peak_xyz_lab=state.peaks.xyz,
+        wavelength=np.array(state.wavelength),
         weights=state.peaks.refine_weights(icfg.B_sharpen),
         space_group=state.space_group,
         centering=get_centering(state.space_group),
         cell_params=state.lattice.to_numpy(),
         peak_radii=state.peaks.radius,
-        lattice_system=lattice_system,
-        goniometer_axes=obj_goniometer.axes,
-        goniometer_angles=obj_goniometer.angles,
-        goniometer_refine_mask=goniometer_refine_mask,
-        goniometer_nominal_offsets=state.goniometer.base_offsets,
         sample_nominal=state.base_sample_offset,
         beam_nominal=state.ki_vec,
-        # refinement
-        refine_lattice=obj_rcfg.refine_lattice,
-        lattice_bound_frac=obj_rcfg.lattice_bound_frac,
-        refine_goniometer=obj_rcfg.refine_goniometer,
-        goniometer_bound_deg=obj_rcfg.goniometer_bound_deg,
-        sample_bound_meters=obj_rcfg.sample_bound_meters,
-        beam_bound_deg=obj_rcfg.beam_bound_deg,
-        refine_sample=obj_rcfg.refine_sample,
-        refine_beam=obj_rcfg.refine_beam,
-        # indexing
-        d_min=icfg.d_min,
-        d_max=icfg.d_max,
-        hkl_search_range=icfg.hkl_search_range,
-        tolerance_deg=icfg.tolerance_deg,
-        loss_method=icfg.loss_method,
-        # softness not used
-        # B_sharpen not used
-        window_batch_size=icfg.window_batch_size,
-        search_window_size=icfg.search_window_size,
-        chunk_size=icfg.chunk_size,
-        num_iters=icfg.num_iters,
-        top_k=icfg.top_k,
+        goniometer_nominal_offsets=state.goniometer.base_offsets,
+
+        lattice_system=lattice_system,
+        goniometer_axes=goniometer_axes,
+        goniometer_angles=goniometer_angles,
+        goniometer_refine_mask=goniometer_refine_mask,
+
+        rcfg=obj_rcfg,
+        icfg=icfg,
+
         static_R=static_R_input,
         kf_lab_fixed_vectors=kf_ki_dir_lab,
         peak_run_indices=run_indices,
