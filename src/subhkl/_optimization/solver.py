@@ -297,39 +297,9 @@ class UBSolver:
             state=target_state,
             init_params=x0,
 
-            # refinement
-            refine_lattice=rcfg.refine_lattice,
-            lattice_bound_frac=rcfg.lattice_bound_frac,
-            refine_goniometer=rcfg.refine_goniometer,
-            refine_goniometer_axes=rcfg.refine_goniometer_axes,
-            goniometer_bound_deg=rcfg.goniometer_bound_deg,
-            refine_sample=rcfg.refine_sample,
-            sample_bound_meters=rcfg.sample_bound_meters,
-            refine_beam=rcfg.refine_beam,
-            beam_bound_deg=rcfg.beam_bound_deg,
-
-            # indexing
-            d_min=icfg.d_min,
-            d_max=icfg.d_max,
-            hkl_search_range=icfg.hkl_search_range,
-            tolerance_deg=icfg.tolerance_deg,
-            loss_method=icfg.loss_method,
-            search_window_size=icfg.search_window_size,
-            window_batch_size=icfg.window_batch_size,
-            chunk_size=icfg.chunk_size,
-            num_iters=icfg.num_iters,
-            top_k=icfg.top_k,
-            softness=icfg.softness,
-            B_sharpen=icfg.B_sharpen,
-
-            # solver
-            strategy_name=scfg.strategy_name,
-            population_size=scfg.population_size,
-            num_generations=scfg.num_generations,
-            n_runs=scfg.n_runs,
-            seed=scfg.seed,
-            batch_size=scfg.batch_size,
-            sigma_init=scfg.sigma_init,
+            rcfg=rcfg,
+            icfg=icfg,
+            scfg=scfg,
         )
 
         return result
