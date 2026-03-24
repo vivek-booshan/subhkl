@@ -8,6 +8,7 @@ import scipy.linalg
 from subhkl.core.spacegroup import is_systematically_absent
 from subhkl.core.models import (
     LatticeSystem,
+    _Params,
     LATTICE_CONFIG,
     LATTICE_CONSTRAINTS,
     SG_SYSTEM_MAP,
@@ -183,7 +184,7 @@ class Lattice:
 
     # NOTE(vivek): uses numpy
     @classmethod
-    def from_b_matrix(cls, B, system: LatticeSystem=LatticeSystem.TRICLINIC):
+    def from_b_matrix(cls, B, system: LatticeSystem = LatticeSystem.TRICLINIC):
         G_star = B.T @ B
         G = np.linalg.inv(G_star)
         a = np.sqrt(G[0, 0])
@@ -282,3 +283,30 @@ class Lattice:
                 return Lattice(*lattice_cell, system=expected), num_params
             case _:
                 raise ValueError(f"Unknown return type: {return_type}")
+
+
+class LatticeSOA:
+    """Dedicated class for structure of array oriented lattices"""
+    @staticmethod
+    def compute_B_batched(batched_lattice):
+        deg2rad = jnp.pi / 180.0
+        a = batched_lattice[:, _Params.A]
+        b = batched_lattice[:, _Params.B]
+        c = batched_lattice[:, _Params.C]
+        alpha = batched_lattice[:, _Params.ALPHA] * deg2rad
+        beta = batched_lattice[:, _Params.BETA] * deg2rad
+        gamma = batched_lattice[:, _Params.GAMMA] * deg2rad
+
+        g11, g22, g33 = a**2, b**2, c**2
+        g12 = a * b * jnp.cos(gamma)
+        g13 = a * c * jnp.cos(beta)
+        g23 = b * c * jnp.cos(alpha)
+
+        row1 = jnp.stack([g11, g12, g13], axis=-1)
+        row2 = jnp.stack([g12, g22, g23], axis=-1)
+        row3 = jnp.stack([g13, g23, g33], axis=-1)
+
+        G = jnp.stack([row1, row2, row3], axis=-2)
+        G_star = jnp.linalg.inv(G)
+
+        return jsl.cholesky(G_star, lower=False)

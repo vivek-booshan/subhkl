@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 
 from subhkl.core.math import rotation_from_axis_angle, rotation_from_rodrigues
+from subhkl.core.crystallography import LatticeSOA
 from subhkl.core.spacegroup import generate_hkl_mask
 
 # Import JAX with fallback from utils (centralized)
@@ -12,10 +13,13 @@ from subhkl.utils.shim import (
     OPTIMIZATION_BACKEND,
     jax,
     jnp,
-    jnp_update_add,
-    jnp_update_set,
-    jscipy_linalg,
 )
+
+def update_add(arr, idx, val):
+    return arr.at[idx].add(val)
+
+def update_set(arr, idx, val):
+    return arr.at[idx].set(val)
 
 if HAS_JAX:
     jax.config.update("jax_enable_x64", True)
@@ -409,6 +413,7 @@ class VectorizedObjective:
         self.mask_range_h = h_max
         self.mask_range_k = k_max
         self.mask_range_l = l_max
+        self.mask_range = self.mask_range_h
 
         idx_h = hkl_pool[0] + h_max
         idx_k = hkl_pool[1] + k_max
@@ -464,7 +469,7 @@ class VectorizedObjective:
         if self.refine_lattice:
             n_lat = self.free_params_init.size
             cell_params_norm = x[:, idx : idx + n_lat]
-            B = self.compute_B_jax(cell_params_norm)
+            B = LatticeSOA.compute_B_batched(cell_params_norm)
             idx += n_lat
             # Broadcase UB calculation: (S, 3, 3) @ (S, 3, 3) -> (S, 3, 3)
             UB = jnp.matmul(U, B)
@@ -487,8 +492,8 @@ class VectorizedObjective:
             ty = _forward_map_param(x[:, idx + 1], bound_rad)
             idx += 2
             ki_vec = jnp.tile(self.beam_nominal[None, :], (x.shape[0], 1))
-            ki_vec = jnp_update_add(ki_vec, (slice(None), 0), tx)
-            ki_vec = jnp_update_add(ki_vec, (slice(None), 1), ty)
+            ki_vec = update_add(ki_vec, (slice(None), 0), tx)
+            ki_vec = update_add(ki_vec, (slice(None), 1), ty)
             ki_vec = ki_vec / jnp.linalg.norm(ki_vec, axis=1, keepdims=True)
         else:
             ki_vec = self.beam_nominal[None, :].repeat(x.shape[0], axis=0)
@@ -496,7 +501,7 @@ class VectorizedObjective:
         if self.refine_goniometer:
             gonio_norm = jnp.full((x.shape[0], self.num_gonio_axes), 0.5)
             if self.num_active_gonio > 0:
-                gonio_norm = jnp_update_set(
+                gonio_norm = update_set(
                     gonio_norm,
                     (slice(None), self.gonio_mask),
                     x[:, idx : idx + self.num_active_gonio],
@@ -552,30 +557,6 @@ class VectorizedObjective:
             )
             return jnp.stack([a, b, c, deg90, beta, deg90], axis=1)
         return p_free
-
-    def compute_B_jax(self, cell_params_norm):
-        # FIX
-        p = self.reconstruct_cell_params(cell_params_norm)
-        a, b, c = p[:, 0], p[:, 1], p[:, 2]
-        deg2rad = jnp.pi / 180.0
-        alpha, beta, gamma = (
-            p[:, 3] * deg2rad,
-            p[:, 4] * deg2rad,
-            p[:, 5] * deg2rad,
-        )
-        g11, g22, g33 = a**2, b**2, c**2
-        g12, g13, g23 = (
-            a * b * jnp.cos(gamma),
-            a * c * jnp.cos(beta),
-            b * c * jnp.cos(alpha),
-        )
-        row1 = jnp.stack([g11, g12, g13], axis=-1)
-        row2 = jnp.stack([g12, g22, g23], axis=-1)
-        row3 = jnp.stack([g13, g23, g33], axis=-1)
-        G = jnp.stack([row1, row2, row3], axis=-2)
-        G_star = jnp.linalg.inv(G)
-        B = jscipy_linalg.cholesky(G_star, lower=False)
-        return B
 
     def compute_goniometer_R_jax(self, gonio_offsets_norm):
         # NOTE: This helper uses Norm to calc Delta, then adds Nominal from self.
