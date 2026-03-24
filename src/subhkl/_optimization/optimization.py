@@ -3,15 +3,14 @@ from functools import partial
 
 import numpy as np
 
+from subhkl.core.math import rotation_from_axis_angle, rotation_from_rodrigues
 from subhkl.core.spacegroup import generate_hkl_mask
-from subhkl.core.spacegroup import get_space_group_object
 
 # Import JAX with fallback from utils (centralized)
 from subhkl.utils.shim import (
     HAS_JAX,
     OPTIMIZATION_BACKEND,
     jax,
-    lax,
     jnp,
     jnp_update_add,
     jnp_update_set,
@@ -73,198 +72,6 @@ def _forward_map_lattice(norm, nominal, frac_bound):
     return min_val + norm * (max_val - min_val)
 
 
-def rotation_matrix_from_axis_angle_jax(axis, angle_rad):
-    u = axis / jnp.linalg.norm(axis)
-    ux, uy, uz = u
-    K = jnp.array([[0.0, -uz, uy], [uz, 0.0, -ux], [-uy, ux, 0.0]])
-    c = jnp.cos(angle_rad)
-    s = jnp.sin(angle_rad)
-    eye = jnp.eye(3)
-    R = eye + s[..., None, None] * K + (1.0 - c)[..., None, None] * (K @ K)
-    return R
-
-
-def rotation_matrix_from_rodrigues_jax(w):
-    theta = jnp.linalg.norm(w) + 1e-9
-    k = w / theta
-    K = jnp.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
-    eye = jnp.eye(3)
-    R = eye + jnp.sin(theta) * K + (1 - jnp.cos(theta)) * (K @ K)
-    return R
-
-
-def _get_active_lattice_indices(lattice_system):
-    if lattice_system == "Cubic":
-        return [0]
-    if lattice_system == "Hexagonal" or lattice_system == "Tetragonal":
-        return [0, 2]
-    if lattice_system == "Rhombohedral":
-        return [0, 3]
-    if lattice_system == "Orthorhombic":
-        return [0, 1, 2]
-    if lattice_system == "Monoclinic":
-        return [0, 1, 2, 4]
-    return [0, 1, 2, 3, 4, 5]
-
-
-def get_lattice_system(
-    a, b, c, alpha, beta, gamma, space_group_name, atol_len=0.05, atol_ang=0.5
-):
-    """
-    Determine the Lattice System for refinement based on Space Group and Geometry.
-
-    Logic:
-    1. Determine 'Expected' system from Space Group (Bravais Lattice).
-    2. Determine 'Geometric' system from parameter values (e.g. 90 deg, a=b).
-    3. Constraint Check: If Geometry violates Space Group (e.g. 88 deg for Cubic), WARN.
-    4. Override: If Expected symmetry is LOWER than Geometric (e.g. P1 SG but 90-90-90 params),
-       force LOWER symmetry (Triclinic) to allow full refinement.
-    """
-
-    # --- 1. Determine Expected System from Space Group ---
-    try:
-        sg = get_space_group_object(space_group_name)
-        # Gemmi CrystalSystem: triclinic, monoclinic, orthorhombic, tetragonal, trigonal, hexagonal, cubic
-        sys_str = str(sg.crystal_system()).split(".")[-1].lower()
-        centering = sg.centring_type()  # 'P', 'F', 'I', 'R', etc.
-    except Exception:
-        sys_str = "triclinic"  # Fallback
-        centering = "P"
-
-    # Map to internal types
-    expected = "Triclinic"
-    if sys_str == "cubic":
-        expected = "Cubic"
-    elif sys_str == "hexagonal":
-        expected = "Hexagonal"
-    elif sys_str == "trigonal":
-        expected = "Rhombohedral" if centering == "R" else "Hexagonal"
-    elif sys_str == "tetragonal":
-        expected = "Tetragonal"
-    elif sys_str == "orthorhombic":
-        expected = "Orthorhombic"
-    elif sys_str == "monoclinic":
-        expected = "Monoclinic"
-
-    # --- 2. Check Constraints & Warn ---
-    def is_90(x):
-        return np.isclose(x, 90.0, atol=atol_ang)
-
-    def is_120(x):
-        return np.isclose(x, 120.0, atol=atol_ang)
-
-    def eq(x, y):
-        return np.isclose(x, y, atol=atol_len)
-
-    violation_msg = []
-
-    if expected == "Cubic":
-        if not (eq(a, b) and eq(b, c)):
-            violation_msg.append("a=b=c")
-        if not (is_90(alpha) and is_90(beta) and is_90(gamma)):
-            violation_msg.append("angles=90")
-    elif expected == "Hexagonal":
-        if not eq(a, b):
-            violation_msg.append("a=b")
-        if not (is_90(alpha) and is_90(beta) and is_120(gamma)):
-            violation_msg.append("angles=90,90,120")
-    elif expected == "Rhombohedral":
-        if not (eq(a, b) and eq(b, c)):
-            violation_msg.append("a=b=c")
-        if not (eq(alpha, beta) and eq(beta, gamma)):
-            violation_msg.append("alpha=beta=gamma")
-    elif expected == "Tetragonal":
-        if not eq(a, b):
-            violation_msg.append("a=b")
-        if not (is_90(alpha) and is_90(beta) and is_90(gamma)):
-            violation_msg.append("angles=90")
-    elif expected == "Orthorhombic":
-        if not (is_90(alpha) and is_90(beta) and is_90(gamma)):
-            violation_msg.append("angles=90")
-    elif expected == "Monoclinic":
-        # Assuming b-unique or c-unique depending on settings, roughly check if at least two are 90
-        count90 = sum([is_90(alpha), is_90(beta), is_90(gamma)])
-        if count90 < 2:
-            violation_msg.append("at least two angles=90")
-
-    if violation_msg:
-        warnings.warn(
-            f"\n[Lattice System] Input parameters violate {space_group_name} ({expected}) constraints: {', '.join(violation_msg)}.\n"
-            f"optimization will enforce {expected} constraints, which may cause a jump in parameters.",
-            stacklevel=2,
-        )
-
-    # --- 3. Geometric Inference (Legacy Logic) ---
-    geometric = "Triclinic"
-    if is_90(alpha) and is_90(beta) and is_90(gamma):
-        if eq(a, b) and eq(b, c):
-            geometric = "Cubic"
-        elif eq(a, b):
-            geometric = "Tetragonal"
-        else:
-            geometric = "Orthorhombic"
-    elif is_90(alpha) and is_90(beta) and is_120(gamma):
-        if eq(a, b):
-            geometric = "Hexagonal"
-    elif (
-        centering == "R"
-        and eq(a, b)
-        and eq(b, c)
-        and eq(alpha, beta)
-        and eq(beta, gamma)
-    ):
-        geometric = "Rhombohedral"
-    elif sum([is_90(alpha), is_90(beta), is_90(gamma)]) >= 2:
-        geometric = "Monoclinic"
-
-    # --- 4. Hierarchy and Override ---
-    # Rank symmetries: Lower number = Lower Symmetry (More free params)
-    ranks = {
-        "Triclinic": 0,
-        "Monoclinic": 1,
-        "Orthorhombic": 2,
-        "Tetragonal": 3,
-        "Rhombohedral": 4,
-        "Hexagonal": 4,
-        "Cubic": 5,
-    }
-
-    rank_exp = ranks.get(expected, 0)
-    rank_geo = ranks.get(geometric, 0)
-
-    # Decision Rule:
-    # 1. If Expected is LOWER symmetry than Geometric (e.g. P1 SG, but 90-90-90 params),
-    #    we MUST use Expected (Triclinic) to allow refinement of angles away from 90.
-    # 2. If Expected is HIGHER symmetry (e.g. Cubic SG, but wonky params),
-    #    we MUST use Expected (Cubic) to enforce Space Group symmetry (despite the warning).
-
-    final_system = expected
-
-    # Calculate free params count
-    # Triclinic(6), Mono(4), Ortho(3), Tet(2), Hex(2), Rho(2), Cub(1)
-    if final_system == "Triclinic":
-        num = 6
-    elif final_system == "Monoclinic":
-        num = 4
-    elif final_system == "Orthorhombic":
-        num = 3
-    elif (
-        final_system == "Tetragonal"
-        or final_system == "Hexagonal"
-        or final_system == "Rhombohedral"
-    ):
-        num = 2
-    elif final_system == "Cubic":
-        num = 1
-    else:
-        num = 6
-
-    if rank_exp < rank_geo:
-        print(
-            f"Lattice System Override: Geometry suggests {geometric}, but Space Group {space_group_name} requires {expected}. Enforcing {expected} (Lower Symmetry)."
-        )
-
-    return final_system, num
 # ==============================================================================
 # 2. VECTORIZED OBJECTIVE (JAX)
 # ==============================================================================
@@ -602,9 +409,6 @@ class VectorizedObjective:
         self.mask_range_h = h_max
         self.mask_range_k = k_max
         self.mask_range_l = l_max
-        self.mask_range = (
-            h_max  # Alias for backward compatibility with cubic-assumption tests
-        )
 
         idx_h = hkl_pool[0] + h_max
         idx_k = hkl_pool[1] + k_max
@@ -750,6 +554,7 @@ class VectorizedObjective:
         return p_free
 
     def compute_B_jax(self, cell_params_norm):
+        # FIX
         p = self.reconstruct_cell_params(cell_params_norm)
         a, b, c = p[:, 0], p[:, 1], p[:, 2]
         deg2rad = jnp.pi / 180.0
@@ -788,7 +593,7 @@ class VectorizedObjective:
             direction = axis_spec[0:3]
             sign = axis_spec[3]
             theta = sign * angles_deg[:, i, :] * deg2rad
-            Ri = rotation_matrix_from_axis_angle_jax(direction, theta)
+            Ri = rotation_from_axis_angle(direction, theta)
             # Mantid SetGoniometer: R = R0 @ R1 @ R2
             # Each Ri should be multiplied on the RIGHT of the current accumulated matrix.
             # Batched matmul: (S, M, 3, 3) @ (S, M, 3, 3) -> (S, M, 3, 3)
@@ -796,517 +601,8 @@ class VectorizedObjective:
         return R
 
     def orientation_U_jax(self, param):
-        U = jax.vmap(rotation_matrix_from_rodrigues_jax)(param)
+        U = jax.vmap(rotation_from_rodrigues)(param)
         return U
-
-    def indexer_dynamic_soft_jax(
-        self, ub_mat, kf_ki_sample, k_sq_override=None, tolerance_rad=0.002
-    ):
-        ub_inv = jnp.linalg.inv(ub_mat)
-        # Batched matmul: (S, 3, 3) @ (S, 3, N) -> (S, 3, N)
-        v = jnp.matmul(ub_inv, kf_ki_sample)
-        abs_v = jnp.abs(v)
-        max_v_val = jnp.max(abs_v, axis=1)
-        n_start = max_v_val / self.wl_max_val
-        start_int = jnp.ceil(n_start)
-        k_sq = k_sq_override if k_sq_override is not None else self.k_sq_init[None, :]
-        k_norm = jnp.sqrt(k_sq)
-
-        initial_carry = (
-            jnp.zeros(max_v_val.shape),
-            jnp.zeros(max_v_val.shape),
-            jnp.zeros((v.shape[0], 3, v.shape[2]), dtype=jnp.int32),
-            jnp.zeros(max_v_val.shape),
-        )
-
-        def scan_body(carry, i):
-            curr_sum, curr_max, curr_best_hkl, curr_best_lamb = carry
-            n = start_int + i
-            n_safe = jnp.where(n == 0, 1e-9, n)
-            lamda_cand = max_v_val / n_safe
-            hkl_float = v / lamda_cand[:, None, :]
-            hkl_int = jnp.round(hkl_float).astype(jnp.int32)
-            # Batched matmul: (S, 3, 3) @ (S, 3, N) -> (S, 3, N)
-            q_int = jnp.matmul(ub_mat, hkl_int.astype(jnp.float32))
-            k_dot_q = jnp.sum(kf_ki_sample * q_int, axis=1)
-            safe_dot = jnp.where(jnp.abs(k_dot_q) < 1e-9, 1e-9, k_dot_q)
-            lambda_opt = jnp.clip(k_sq / safe_dot, self.wl_min_val, self.wl_max_val)
-            q_obs = kf_ki_sample / lambda_opt[:, None, :]
-            dist_sq = jnp.sum((q_obs - q_int) ** 2, axis=1)
-
-            effective_sigma = (tolerance_rad + self.peak_radii[None, :]) * (
-                k_norm / lambda_opt
-            )
-            # Robust Multi-Scale Kernel
-            # 1. Narrow (High precision)
-            log_p_narrow = -dist_sq / (2 * effective_sigma**2 + 1e-9)
-
-            # 2. Wide (Capture range: 5 degrees)
-            sigma_wide = jnp.deg2rad(5.0) * (k_norm / lambda_opt)
-            log_p_wide = -dist_sq / (2 * sigma_wide**2 + 1e-9)
-
-            # Combine via LogSumExp with 1% weight on wide kernel
-            log_prob = jax.nn.logsumexp(
-                jnp.stack([log_p_narrow, log_p_wide - 4.605]), axis=0
-            )
-            prob = jnp.exp(log_prob)
-
-            # 1. Calc |Q|^2 for predicted HKL
-            q_sq_pred = jnp.sum(q_int**2, axis=1)
-            # 2. Convert to d = 1/|Q| (Crystallographic units)
-            d_pred = 1.0 / jnp.sqrt(q_sq_pred + 1e-9)
-            valid_res = (d_pred >= self.d_min) & (d_pred <= self.d_max)
-
-            h, k, l = (  # noqa: E741
-                hkl_int[:, 0, :],
-                hkl_int[:, 1, :],
-                hkl_int[:, 2, :],
-            )
-            is_allowed = self.is_allowed_jax(h, k, l)
-
-            # Combine masks
-            final_mask = is_allowed & valid_res
-
-            prob = jnp.where(final_mask, prob, 0.0)
-
-            new_sum = curr_sum + prob
-            update_mask = prob > curr_max
-            new_max = jnp.where(update_mask, prob, curr_max)
-            new_best_hkl = jnp.where(update_mask[:, None, :], hkl_int, curr_best_hkl)
-            new_best_lamb = jnp.where(update_mask, lambda_opt, curr_best_lamb)
-            return (new_sum, new_max, new_best_hkl, new_best_lamb), None
-
-        final_carry, _ = lax.scan(
-            scan_body, initial_carry, jnp.arange(self.num_candidates)
-        )
-        accum_probs, prob_max, best_hkl, best_lamb = final_carry
-        # score = -jnp.sum(self.weights * accum_probs, axis=1) # Original sum
-        score = -jnp.sum(self.weights * prob_max, axis=1)
-        return score, prob_max, best_hkl.transpose((0, 2, 1)), best_lamb
-
-    def indexer_dynamic_cosine_aniso_jax(
-        self, ub_mat, kf_ki_sample, *, k_sq_override=None, tolerance_rad=0.002
-    ):
-        # Use solve for better precision than inv + matmul
-        v = jnp.linalg.solve(ub_mat, kf_ki_sample)
-        abs_v = jnp.abs(v)
-        max_v_val = jnp.max(abs_v, axis=1)
-        n_start = max_v_val / self.wl_max_val
-        start_int = jnp.ceil(n_start)
-
-        k_sq = k_sq_override if k_sq_override is not None else self.k_sq_init[None, :]
-
-        # kappa for von Mises-Fisher-like concentration in HKL space
-        # Uniform angular tolerance: sigma_h approx tolerance_rad * h.
-
-        initial_carry = (
-            jnp.full(max_v_val.shape, -1e12),
-            jnp.full(max_v_val.shape, -1e12),
-            jnp.zeros((v.shape[0], 3, v.shape[2]), dtype=jnp.int32),
-            jnp.zeros(max_v_val.shape),
-        )
-
-        def scan_body(carry, i):
-            curr_sum, curr_max, curr_best_hkl, curr_best_lamb = carry
-            n = start_int + i
-            n_safe = jnp.where(n == 0, 1e-9, n)
-            lamda_cand = max_v_val / n_safe
-
-            # --- DYNAMIC WAVELENGTH OPTIMIZATION ---
-            # Instead of just using lamda_cand, we find the lambda that best
-            # satisfies the Laue condition for the nearest integer HKL.
-            hkl_int = jnp.round(v / lamda_cand[:, None, :]).astype(jnp.int32)
-            # Batched matmul: (S, 3, 3) @ (S, 3, N) -> (S, 3, N)
-            q_int = jnp.matmul(ub_mat, hkl_int.astype(jnp.float32))
-            k_dot_q = jnp.sum(kf_ki_sample * q_int, axis=1)
-            safe_dot = jnp.where(jnp.abs(k_dot_q) < 1e-9, 1e-9, k_dot_q)
-            lambda_opt = jnp.clip(k_sq / safe_dot, self.wl_min_val, self.wl_max_val)
-
-            # Recalculate HKL float at the optimal wavelength for the cosine kernel
-            hkl_float = v / lambda_opt[:, None, :]
-
-            # Robust Multi-Scale Kernel: Mixture of Narrow + Wide peaks
-            # We use an isotropic tolerance based on the total HKL magnitude
-            # to represent a uniform angular tolerance (sigma_h approx tolerance_rad * |h|).
-            # This prevents the 'delta function' behavior for components near zero.
-            hkl_mag_sq = jnp.sum(hkl_float**2, axis=1, keepdims=True)
-            # Use 1.0 as floor to ensure low-order reflections don't have infinite precision
-            hkl_mag_sq_safe = jnp.maximum(hkl_mag_sq, 1.0)
-
-            kappa_scaled = 1.0 / (
-                hkl_mag_sq_safe * (tolerance_rad + 1e-9) ** 2 * 4 * jnp.pi**2
-            )
-            # Use stable sin^2 form: cos(2pi x) - 1 = -2 sin^2(pi x)
-            cos_diff_stable = -2.0 * jnp.sin(jnp.pi * hkl_float) ** 2
-            log_p_narrow = jnp.sum(kappa_scaled * cos_diff_stable, axis=1)
-
-            kappa_wide_scaled = 1.0 / (
-                hkl_mag_sq_safe * jnp.deg2rad(5.0) ** 2 * 4 * jnp.pi**2
-            )
-            log_p_wide = jnp.sum(kappa_wide_scaled * cos_diff_stable, axis=1)
-
-            # Combine via LogSumExp with 1% weight on wide kernel
-            log_prob = jax.nn.logsumexp(
-                jnp.stack([log_p_narrow, log_p_wide - 4.605]), axis=0
-            )
-
-            # --- VALIDATION LOGIC ---
-            # Resolution Filter
-            q_sq = jnp.sum(q_int**2, axis=1)
-            d_est = 1.0 / jnp.sqrt(q_sq + 1e-9)
-            valid_res = (d_est >= self.d_min) & (d_est <= self.d_max)
-
-            # Symmetry Mask
-            h, k, l = (  # noqa: E741
-                hkl_int[:, 0, :],
-                hkl_int[:, 1, :],
-                hkl_int[:, 2, :],
-            )
-            is_allowed = self.is_allowed_jax(h, k, l)
-
-            # Combine all masks
-            final_mask = is_allowed & valid_res
-
-            # Use LogSumExp style accumulation for robustness
-            log_prob_masked = jnp.where(final_mask, log_prob, -1e12)
-
-            # Update carry
-            # curr_sum will now store the logsumexp of valid candidates
-            new_sum = jax.nn.logsumexp(jnp.stack([curr_sum, log_prob_masked]), axis=0)
-
-            update_mask = log_prob_masked > curr_max
-            new_max = jnp.where(update_mask, log_prob_masked, curr_max)
-            new_best_hkl = jnp.where(update_mask[:, None, :], hkl_int, curr_best_hkl)
-            new_best_lamb = jnp.where(update_mask, lambda_opt, curr_best_lamb)
-            return (new_sum, new_max, new_best_hkl, new_best_lamb), None
-
-        final_carry, _ = lax.scan(
-            scan_body, initial_carry, jnp.arange(self.num_candidates)
-        )
-        accum_probs, log_prob_max, best_hkl, best_lamb = final_carry
-        # score = -jnp.sum(self.weights * jnp.exp(accum_probs), axis=1)
-        # Use max probability per peak for the score
-        score = -jnp.sum(self.weights * jnp.exp(log_prob_max), axis=1)
-        return (
-            score,
-            jnp.exp(log_prob_max),
-            best_hkl.transpose((0, 2, 1)),
-            best_lamb,
-        )
-
-    def indexer_dynamic_binary_jax(
-        self,
-        ub_mat,
-        kf_ki_sample,
-        k_sq_override=None,
-        tolerance_rad=0.002,
-        window_batch_size=32,
-    ):
-        k_sq = k_sq_override if k_sq_override is not None else self.k_sq_init[None, :]
-        k_norm = jnp.sqrt(k_sq)
-        ub_inv = jnp.linalg.inv(ub_mat)
-        # Batched matmul: (S, 3, 3) @ (S, 3, N) -> (S, 3, N)
-        hkl_float = jnp.matmul(ub_inv, kf_ki_sample)
-        # Broadcasted matmul: (3, 3) @ (S, 3, N) -> (S, 3, N)
-        hkl_cart_approx = jnp.matmul(self.B[None, ...], hkl_float)
-        phi_obs = jnp.arctan2(hkl_cart_approx[:, 1, :], hkl_cart_approx[:, 0, :])
-        idx_centers = jnp.searchsorted(self.pool_phi_sorted, phi_obs)
-        half_win = self.search_window_size // 2
-        raw_offsets = jnp.arange(-half_win, half_win + 1)
-        pad_len = (
-            window_batch_size - (raw_offsets.shape[0] % window_batch_size)
-        ) % window_batch_size
-        offsets_padded = jnp.pad(
-            raw_offsets, (0, pad_len), constant_values=raw_offsets[-1]
-        )
-        offset_batches = offsets_padded.reshape(-1, window_batch_size)
-        init_min_dist = jnp.full(idx_centers.shape, 1e9)
-        init_best_hkl = jnp.zeros((*idx_centers.shape, 3))
-        init_best_lamb = jnp.zeros(idx_centers.shape)
-        init_carry = (init_min_dist, init_best_hkl, init_best_lamb)
-
-        def scan_body(carry, batch_offsets):
-            curr_min_dist, curr_best_hkl, curr_best_lamb = carry
-            gather_idx = idx_centers[..., None] + batch_offsets[None, None, :]
-            pool_T = self.pool_hkl_sorted.T
-            hkl_cands = jnp.take(pool_T, gather_idx, axis=0, mode="wrap")
-            # Broadcasted matmul: (S, 3, 3) @ (S, M, W, 3, 1) -> (S, M, W, 3, 1)
-            # hkl_cands is (S, M, W, 3)
-            q_pred = jnp.matmul(
-                ub_mat[:, None, None, ...], hkl_cands[..., None]
-            ).squeeze(-1)
-            k_obs = jnp.transpose(kf_ki_sample, (0, 2, 1))[:, :, None, :]
-            k_dot_q = jnp.sum(k_obs * q_pred, axis=3)
-            lambda_opt = k_sq[..., None] / jnp.where(
-                jnp.abs(k_dot_q) < 1e-9, 1e-9, k_dot_q
-            )
-            valid_lamb = (lambda_opt >= self.wl_min_val) & (
-                lambda_opt <= self.wl_max_val
-            )
-            q_sq = jnp.sum(q_pred**2, axis=3)
-            d_spacings = 1.0 / jnp.sqrt(q_sq + 1e-9)  # crystallographic convention
-            valid_res = (d_spacings >= self.d_min) & (d_spacings <= self.d_max)
-            h, k, l = (  # noqa: E741
-                hkl_cands[..., 0],
-                hkl_cands[..., 1],
-                hkl_cands[..., 2],
-            )
-            valid_sym = self.is_allowed_jax(h, k, l)
-            valid_mask = valid_lamb & valid_res & valid_sym
-            q_obs_opt = k_obs / jnp.where(lambda_opt == 0, 1.0, lambda_opt)[..., None]
-            diff = q_obs_opt - q_pred
-            dist_sq = jnp.sum(diff**2, axis=3)
-            dist_sq_masked = jnp.where(valid_mask, dist_sq, 1e9)
-            batch_min_dist = jnp.min(dist_sq_masked, axis=2)
-            batch_best_local_idx = jnp.argmin(dist_sq_masked, axis=2)
-            batch_best_hkl = jnp.take_along_axis(
-                hkl_cands, batch_best_local_idx[..., None, None], axis=2
-            ).squeeze(axis=2)
-            batch_best_lamb = jnp.take_along_axis(
-                lambda_opt, batch_best_local_idx[..., None], axis=2
-            ).squeeze(axis=2)
-            improve_mask = batch_min_dist < curr_min_dist
-            new_min_dist = jnp.where(improve_mask, batch_min_dist, curr_min_dist)
-            new_best_hkl = jnp.where(
-                improve_mask[..., None], batch_best_hkl, curr_best_hkl
-            )
-            new_best_lamb = jnp.where(improve_mask, batch_best_lamb, curr_best_lamb)
-            return (new_min_dist, new_best_hkl, new_best_lamb), None
-
-        final_carry, _ = lax.scan(scan_body, init_carry, offset_batches)
-        best_dist_sq, best_hkl, best_lamb = final_carry
-
-        # Use dynamic lambda for accurate physical tolerance scaling
-        effective_sigma = (tolerance_rad + self.peak_radii[None, :]) * (
-            k_norm / best_lamb
-        )
-        probs = jnp.exp(-best_dist_sq / (2 * effective_sigma**2 + 1e-9))
-        score = -jnp.sum(self.weights * probs, axis=1)
-        return score, probs, best_hkl, best_lamb
-
-    # ==========================================================================
-    # OPTIMIZED SINKHORN-EM INDEXER (Memory Efficient + Rotation Trick)
-    # ==========================================================================
-    def indexer_sinkhorn_jax(
-        self,
-        ub_mat,
-        kf_ki_sample,
-        k_sq_override=None,
-        tolerance_rad=0.002,
-        num_iters=20,
-        epsilon=1.0,
-        top_k=32,
-        chunk_size=256,
-    ):
-        """
-        Robust Memory-Efficient Sinkhorn with Soft-Masking and Log-Stability.
-        """
-        # 1. Setup Data
-        hkl_pool = self.pool_hkl_flat  # (3, N_hkl)
-
-        # Normalize Obs
-        norm_obs = jnp.linalg.norm(kf_ki_sample, axis=1, keepdims=True)
-        r_obs_unit = kf_ki_sample / (norm_obs + 1e-9)
-
-        # Re-project Unit Obs into Crystal Frame: (Batch, 3, N_obs) @ (Batch, 3, 3) -> (Batch, 3, N_obs)
-        # We need r_obs_unit_crystal = U^T @ r_obs_unit_lab
-        # Batched matmul: (S, 3, 3) @ (S, 3, N) -> (S, 3, N)
-        r_obs_proj_unit = jnp.matmul(ub_mat.transpose(0, 2, 1), r_obs_unit)
-
-        k_sq_obs = (
-            k_sq_override if k_sq_override is not None else self.k_sq_init[None, :]
-        )
-
-        batch_size, _, n_obs = kf_ki_sample.shape
-        _, n_hkl = hkl_pool.shape
-
-        # Bandwidth and Resolution Constants for Penalties
-        wl_mid = 0.5 * (self.wl_min_val + self.wl_max_val)
-        wl_half_width = 0.5 * (self.wl_max_val - self.wl_min_val)
-        res_mid = 0.5 * (self.d_min + self.d_max)
-        res_half_width = 0.5 * (self.d_max - self.d_min)
-
-        # Pad pool for chunking
-        pad_len = (chunk_size - (n_hkl % chunk_size)) % chunk_size
-        hkl_pool_padded = (
-            jnp.pad(hkl_pool, ((0, 0), (0, pad_len)), constant_values=0)
-            if pad_len > 0
-            else hkl_pool
-        )
-        n_hkl_padded = n_hkl + pad_len
-
-        num_chunks = n_hkl_padded // chunk_size
-
-        def scan_topk(carry, i):
-            curr_vals, curr_idxs = carry
-            idx_start = i * chunk_size
-            hkl_chunk = jax.lax.dynamic_slice(
-                hkl_pool_padded, (0, idx_start), (3, chunk_size)
-            )
-
-            # dot_raw = (r_obs @ U) . h
-            # r_obs_proj_unit is (Batch, 3, N_obs), hkl_chunk is (3, Chunk)
-            # Result (Batch, N_obs, Chunk)
-            # (S, 3, N).T @ (3, C) -> (S, N, C)
-            dot_raw = jnp.matmul(r_obs_proj_unit.transpose(0, 2, 1), hkl_chunk)
-
-            # cosine = dot_raw / |UB h|
-
-            # Use pinned norms to prevent the optimizer from 'cheating' by
-            # enlarging the lattice to reduce the predicted |Q|.
-            norm_q_chunk_pinned = jax.lax.dynamic_slice(
-                self.pool_norm_q_pinned, (idx_start,), (chunk_size,)
-            )
-            dots_chunk = dot_raw / (norm_q_chunk_pinned[None, None, :] + 1e-9)
-
-            # --- FIX: Resolution & Wavelength Aware Top-K ---
-            # lambda = k_sq_obs / (norm_obs * dot_raw)
-            # norm_obs is (batch, 1, n_obs), dot_raw is (batch, n_obs, chunk)
-            safe_dot = jnp.maximum(dot_raw, 1e-6)
-            est_lambda = k_sq_obs[:, :, None] / (
-                norm_obs.transpose(0, 2, 1) * safe_dot + 1e-9
-            )
-
-            wl_penalty = -jnp.abs(est_lambda - wl_mid) / (wl_half_width + 1e-9)
-
-            # norm_q_chunk_pinned is (chunk,)
-            d_chunk = 1.0 / (norm_q_chunk_pinned + 1e-9)
-            res_penalty = -jnp.abs(d_chunk - res_mid) / (res_half_width + 1e-9)
-
-            selection_metric = (
-                dots_chunk + 0.1 * wl_penalty + 0.1 * res_penalty[None, None, :]
-            )
-
-            # Handle padded 0,0,0 vectors (norm 0) by ensuring they have low metrics
-            selection_metric = jnp.where(
-                norm_q_chunk_pinned[None, None, :] < 1e-6, -1e9, selection_metric
-            )
-
-            global_idxs = (jnp.arange(chunk_size) + idx_start).astype(jnp.int32)
-            combined_vals = jnp.concatenate([curr_vals, selection_metric], axis=2)
-            combined_idxs = jnp.concatenate(
-                [
-                    curr_idxs,
-                    jnp.tile(global_idxs[None, None, :], (batch_size, n_obs, 1)),
-                ],
-                axis=2,
-            )
-
-            vals, top_k_indices = jax.lax.top_k(combined_vals, top_k)
-            idxs = jnp.take_along_axis(combined_idxs, top_k_indices, axis=2)
-            return (vals, idxs), None
-
-        (top_vals, top_idxs), _ = lax.scan(
-            scan_topk,
-            (
-                jnp.full((batch_size, n_obs, top_k), -1e9),
-                jnp.zeros((batch_size, n_obs, top_k), dtype=jnp.int32),
-            ),
-            jnp.arange(num_chunks),
-        )
-
-        # 3. Log-Kernel with Soft Penalties
-        # Gather HKL vectors and re-calculate full geometry for top-k
-        hkl_selected = jnp.take(hkl_pool_padded.T, top_idxs, axis=0)
-        # ub_mat: (S, 3, 3), hkl_selected: (S, N, K, 3)
-        # We want (S, N, K, 3)
-        q_selected = jnp.matmul(
-            ub_mat[:, None, None, ...], hkl_selected[..., None]
-        ).squeeze(-1)
-        q_sq_selected = jnp.sum(q_selected**2, axis=3)
-        norm_q_selected = jnp.sqrt(q_sq_selected + 1e-9)
-
-        # Actual cosines for top-k HKLs
-        # (Batch, 3, N_obs) -> (Batch, N_obs, 3)
-        k_obs_unit = r_obs_unit.transpose(0, 2, 1)[:, :, None, :]
-        dot_selected = jnp.sum(k_obs_unit * q_selected, axis=3)
-        top_cosines = dot_selected / (norm_q_selected + 1e-9)
-
-        # Wavelength penalty
-        k_obs_aligned = kf_ki_sample.transpose(0, 2, 1)[:, :, None, :]
-        k_dot_q = jnp.sum(k_obs_aligned * q_selected, axis=-1)
-        lambda_sparse = k_sq_obs[:, :, None] / (k_dot_q + 1e-9)
-
-        # Soft Lambda Penalty (Gaussian penalty for being outside bandwidth)
-        # Using a broader width (10% of bandwidth) to prevent numerical
-        # drowning of angular signal
-        bw_width = self.wl_max_val - self.wl_min_val
-        dist_wl = jnp.maximum(0.0, self.wl_min_val - lambda_sparse) + jnp.maximum(
-            0.0, lambda_sparse - self.wl_max_val
-        )
-        # Scale: lambda penalty should be comparable to angular penalty (order of 1-10)
-        # dist_wl of 0.1A should not give 1e5 cost.
-        log_P_wl = -0.5 * (dist_wl / (0.1 * bw_width + 1e-9)) ** 2
-
-        # Soft Resolution Penalty
-        d_sparse = 1.0 / norm_q_selected
-        dist_res = jnp.maximum(0.0, self.d_min - d_sparse) + jnp.maximum(
-            0.0, d_sparse - self.d_max
-        )
-        log_P_res = -0.5 * (dist_res / (0.1 * self.d_min + 1e-9)) ** 2
-
-        # Angular kernel (Multi-scale: Peak + Wide Background)
-        # Using a mixture of a narrow peak and a heavy-tailed background ensures
-        # we have a strong gradient near the peak and a stable signal far away.
-        dist_ang = 1.0 - top_cosines
-
-        # log_K_peak = -dist_ang / tolerance^2
-        # log_K_wide = -log(1 + dist_ang / (wide_tol^2))
-        # We use LogSumExp to smoothly combine them
-        log_K_peak = -dist_ang / (tolerance_rad**2 + 1e-9)
-
-        wide_tol = jnp.deg2rad(5.0)  # Always have a 5 degree capture range
-        log_K_wide = -jnp.log(1.0 + dist_ang / (wide_tol**2 + 1e-9))
-
-        # Combine (mixing weight 0.5 implicitly via LogSumExp if we don't scale)
-        log_K = jax.nn.logsumexp(jnp.stack([log_K_peak, log_K_wide]), axis=0)
-
-        # Combine into robust log-likelihood
-        log_K_robust = log_K + log_P_wl + log_P_res
-
-        # --- TIE-BREAKER PENALTIES ---
-        # If multiple HKLs have identical orientation error (cosines),
-        # prefer the one that matches the expected wavelength and resolution center.
-        # This breaks ties caused by the regularizer (1e-9) favoring larger vectors.
-        log_P_wl_tie = -1e-4 * jnp.abs(lambda_sparse - wl_mid) / (wl_half_width + 1e-9)
-        log_P_res_tie = -1e-4 * jnp.abs(d_sparse - res_mid) / (res_half_width + 1e-9)
-        log_K_robust += log_P_wl_tie + log_P_res_tie
-
-        # 5. Dustbin & Softmax
-        # Dustbin represents the "null" HKL match
-        # Match to dustbin if outside the wide capture range (e.g. 3 * wide_tol)
-        outlier_threshold_rad = jnp.minimum(jnp.deg2rad(45.0), 3.0 * wide_tol)
-        dist_outlier = 1.0 - jnp.cos(outlier_threshold_rad)
-        log_K_dustbin_peak = -dist_outlier / (tolerance_rad**2 + 1e-9)
-        log_K_dustbin_wide = -jnp.log(1.0 + dist_outlier / (wide_tol**2 + 1e-9))
-        log_K_dustbin = jax.nn.logsumexp(
-            jnp.stack([log_K_dustbin_peak, log_K_dustbin_wide])
-        )
-        log_K_dustbin = jnp.full((batch_size, n_obs, 1), log_K_dustbin)
-
-        log_K_extended = jnp.concatenate([log_K_robust, log_K_dustbin], axis=2)
-        log_P_softmax = log_K_extended - jax.nn.logsumexp(
-            log_K_extended, axis=2, keepdims=True
-        )
-
-        # 6. Score
-        # We want to maximize the probability of matching ANY valid HKL (non-outlier).
-        # Optimization is MINIMIZATION, so we return the negative probability sum.
-        log_P_match = log_P_softmax[:, :, :-1]
-        log_prob_any = jax.nn.logsumexp(log_P_match, axis=2)
-        score = -jnp.sum(self.weights * jnp.exp(log_prob_any), axis=1)
-
-        # Metrics for reporting
-        best_k_idx = jnp.argmax(log_P_match, axis=2)
-        best_hkl_idx = jnp.take_along_axis(
-            top_idxs, best_k_idx[:, :, None], axis=2
-        ).squeeze(2)
-        best_hkl = jnp.take(hkl_pool_padded.T, best_hkl_idx, axis=0)
-        best_lamb = jnp.take_along_axis(
-            lambda_sparse, best_k_idx[:, :, None], axis=2
-        ).squeeze(2)
-
-        return score, jnp.exp(log_prob_any), best_hkl, best_lamb
 
     def is_allowed_jax(self, h, k, l):  # noqa: E741
         """
@@ -1448,23 +744,65 @@ class VectorizedObjective:
             kf_ki_vec = q_lab
 
         if self.loss_method == "forward":
-            res = self.indexer_dynamic_binary_jax(
+            from .indexers.binary import binary_indexer
+
+            res = binary_indexer(
                 UB,
                 kf_ki_vec,
+                self.B,
+                self.k_sq_init,
+                self.wl_min_val,
+                self.wl_max_val,
+                self.d_min,
+                self.d_max,
+                self.peak_radii,
+                self.weights,
+                self.search_window_size,
+                self.pool_hkl_sorted,
+                self.pool_phi_sorted,
+                self.centering,
+                self.mask_range_h,
+                self.mask_range_k,
+                self.mask_range_l,
+                self.valid_hkl_mask,
                 k_sq_override=k_sq_dyn,
                 tolerance_rad=self.tolerance_rad,
                 window_batch_size=self.window_batch_size,
             )
         elif self.loss_method == "cosine":
-            res = self.indexer_dynamic_cosine_aniso_jax(
+            from .indexers.cosine import cosine_indexer
+
+            res = cosine_indexer(
                 UB,
+                self.wl_min_val,
+                self.wl_max_val,
+                self.d_min,
+                self.d_max,
+                self.k_sq_init,
+                self.num_candidates,
+                self.weights,
+                self.centering,
+                self.mask_range_h,
+                self.mask_range_k,
+                self.mask_range_l,
+                self.valid_hkl_mask,
                 kf_ki_vec,
                 k_sq_override=k_sq_dyn,
                 tolerance_rad=self.tolerance_rad,
             )
         elif self.loss_method == "sinkhorn":
-            res = self.indexer_sinkhorn_jax(
+            from .indexers.sinkhorn import sinkhorn_indexer
+
+            res = sinkhorn_indexer(
                 UB,
+                self.pool_hkl_flat,
+                self.k_sq_init,
+                self.wl_min_val,
+                self.wl_max_val,
+                self.d_min,
+                self.d_max,
+                self.pool_norm_q_pinned,
+                self.weights,
                 kf_ki_vec,
                 k_sq_override=k_sq_dyn,
                 tolerance_rad=self.tolerance_rad,
@@ -1473,9 +811,24 @@ class VectorizedObjective:
                 top_k=self.top_k,
             )
         else:
-            res = self.indexer_dynamic_soft_jax(
+            from .indexers.soft import soft_indexer
+
+            res = soft_indexer(
                 UB,
                 kf_ki_vec,
+                self.wl_min_val,
+                self.wl_max_val,
+                self.k_sq_init,
+                self.peak_radii,
+                self.d_min,
+                self.d_max,
+                self.weights,
+                self.num_candidates,
+                self.centering,
+                self.mask_range_h,
+                self.mask_range_k,
+                self.mask_range_l,
+                self.valid_hkl_mask,
                 k_sq_override=k_sq_dyn,
                 tolerance_rad=self.tolerance_rad,
             )
