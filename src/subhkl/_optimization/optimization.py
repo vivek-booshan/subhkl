@@ -458,7 +458,7 @@ class VectorizedObjective:
         """Reconstruct physical parameters (Base + Delta) for a batch of solutions x."""
         idx = 0
         rot_params = x[:, idx : idx + 3]
-        U = self.orientation_U_jax(rot_params)
+        U = jax.vmap(rotation_from_rodrigues)(rot_params)
         idx += 3
 
         if self.refine_lattice:
@@ -599,55 +599,6 @@ class VectorizedObjective:
             # Batched matmul: (S, M, 3, 3) @ (S, M, 3, 3) -> (S, M, 3, 3)
             R = jnp.matmul(R, Ri)
         return R
-
-    def orientation_U_jax(self, param):
-        U = jax.vmap(rotation_from_rodrigues)(param)
-        return U
-
-    def is_allowed_jax(self, h, k, l):  # noqa: E741
-        """
-        Robust symmetry check in JAX. Uses pre-computed mask for speed,
-        and falls back to centring parity checks for out-of-bounds HKLs.
-        """
-        rh, rk, rl = self.mask_range_h, self.mask_range_k, self.mask_range_l
-        idx_h = jnp.clip(h + rh, 0, 2 * rh).astype(jnp.int32)
-        idx_k = jnp.clip(k + rk, 0, 2 * rk).astype(jnp.int32)
-        idx_l = jnp.clip(l + rl, 0, 2 * rl).astype(jnp.int32)
-
-        in_bounds = (
-            (h >= -rh) & (h <= rh) & (k >= -rk) & (k <= rk) & (l >= -rl) & (l <= rl)
-        )
-
-        # Parity checks for centring
-        h_even = h % 2 == 0
-        k_even = k % 2 == 0
-        l_even = l % 2 == 0
-
-        if self.centering == "F":
-            # All odd or all even
-            allowed_out = (h_even == k_even) & (k_even == l_even)
-        elif self.centering == "I":
-            # h+k+l is even
-            allowed_out = (h + k + l) % 2 == 0
-        elif self.centering == "A":
-            # k+l is even
-            allowed_out = (k + l) % 2 == 0
-        elif self.centering == "B":
-            # h+l is even
-            allowed_out = (h + l) % 2 == 0
-        elif self.centering == "C":
-            # h+k is even
-            allowed_out = (h + k) % 2 == 0
-        elif self.centering == "R":
-            # -h+k+l is divisible by 3
-            allowed_out = (-h + k + l) % 3 == 0
-        else:
-            # P or other: Assume allowed unless we have a specific reason to reject
-            allowed_out = True
-
-        return jnp.where(
-            in_bounds, self.valid_hkl_mask[idx_h, idx_k, idx_l], allowed_out
-        )
 
     @partial(jax.jit, static_argnames="self")
     def get_results(self, x):
