@@ -5,21 +5,22 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from subhkl.core.math import rotation_from_axis_angle, rotation_from_rodrigues
-from subhkl.core.crystallography import LatticeSOA
+from subhkl.core.math import rotation_from_rodrigues
+from subhkl.core.crystallography import LatticeSOA, Lattice
 from subhkl.core.spacegroup import generate_hkl_mask
-from subhkl.utils.shim import (
-    HAS_JAX,
-    OPTIMIZATION_BACKEND,
-)
+from subhkl.utils.shim import HAS_JAX, OPTIMIZATION_BACKEND
+
 
 from .solver import RefinementConfig, IndexingConfig
+from ._helpers import (
+    _forward_map_param,
+    update_add,
+    update_set,
+    reconstruct_cell_params,
+    compute_goniometer_R,
+    get_physical_params,
+)
 
-def update_add(arr, idx, val):
-    return arr.at[idx].add(val)
-
-def update_set(arr, idx, val):
-    return arr.at[idx].set(val)
 
 if HAS_JAX:
     jax.config.update("jax_enable_x64", True)
@@ -43,44 +44,6 @@ def require_jax():
         )
 
 
-# ==============================================================================
-# 1. HELPER FUNCTIONS: Parameter Mapping
-# ==============================================================================
-
-
-def _inverse_map_param(value, bound):
-    if bound < 1e-12:
-        return 0.5
-    norm = (value + bound) / (2.0 * bound)
-    return np.clip(norm, 0.0, 1.0)
-
-
-def _forward_map_param(norm, bound):
-    return norm * 2.0 * bound - bound
-
-
-def _inverse_map_lattice(value, nominal, frac_bound):
-    delta = np.abs(nominal) * frac_bound
-    min_val = nominal - delta
-    max_val = nominal + delta
-    if (max_val - min_val) < 1e-12:
-        return 0.5
-    norm = (value - min_val) / (max_val - min_val)
-    return np.clip(norm, 0.0, 1.0)
-
-
-def _forward_map_lattice(norm, nominal, frac_bound):
-    delta = np.abs(nominal) * frac_bound
-    min_val = nominal - delta
-    max_val = nominal + delta
-    return min_val + norm * (max_val - min_val)
-
-
-# ==============================================================================
-# 2. VECTORIZED OBJECTIVE (JAX)
-# ==============================================================================
-
-
 class VectorizedObjective:
     def __init__(
         self,
@@ -92,10 +55,8 @@ class VectorizedObjective:
         angle_t,
         weights=None,
         cell_params=None,
-
-        rcfg: RefinementConfig=RefinementConfig(),
-        icfg: IndexingConfig=IndexingConfig(),
-
+        rcfg: RefinementConfig = RefinementConfig(),
+        icfg: IndexingConfig = IndexingConfig(),
         lattice_system="Triclinic",
         goniometer_axes=None,
         goniometer_angles=None,
@@ -104,8 +65,6 @@ class VectorizedObjective:
         sample_nominal=None,
         beam_nominal=None,
         peak_radii=None,
-
-
         space_group="P 1",
         centering="P",
         static_R=None,
@@ -233,36 +192,41 @@ class VectorizedObjective:
         self.refine_goniometer = rcfg.refine_goniometer
         self.goniometer_bound_deg = rcfg.goniometer_bound_deg
 
+        # if self.refine_lattice:
+        #     if cell_params is None:
+        #         raise ValueError("cell_params required")
+        #     self.cell_init = jnp.array(cell_params)
+        #     if self.lattice_system == "Cubic":
+        #         self.free_params_init = self.cell_init[0:1]
+        #     elif (
+        #         self.lattice_system == "Hexagonal"
+        #         or self.lattice_system == "Tetragonal"
+        #     ):
+        #         self.free_params_init = jnp.array(
+        #             [self.cell_init[0], self.cell_init[2]]
+        #         )
+        #     elif self.lattice_system == "Rhombohedral":
+        #         self.free_params_init = jnp.array(
+        #             [self.cell_init[0], self.cell_init[3]]
+        #         )
+        #     elif self.lattice_system == "Orthorhombic":
+        #         self.free_params_init = self.cell_init[0:3]
+        #     elif self.lattice_system == "Monoclinic":
+        #         self.free_params_init = jnp.array(
+        #             [
+        #                 self.cell_init[0],
+        #                 self.cell_init[1],
+        #                 self.cell_init[2],
+        #                 self.cell_init[4],
+        #             ]
+        #         )
+        #     else:
+        #         self.free_params_init = self.cell_init
+        
         if self.refine_lattice:
             if cell_params is None:
-                raise ValueError("cell_params required")
-            self.cell_init = jnp.array(cell_params)
-            if self.lattice_system == "Cubic":
-                self.free_params_init = self.cell_init[0:1]
-            elif (
-                self.lattice_system == "Hexagonal"
-                or self.lattice_system == "Tetragonal"
-            ):
-                self.free_params_init = jnp.array(
-                    [self.cell_init[0], self.cell_init[2]]
-                )
-            elif self.lattice_system == "Rhombohedral":
-                self.free_params_init = jnp.array(
-                    [self.cell_init[0], self.cell_init[3]]
-                )
-            elif self.lattice_system == "Orthorhombic":
-                self.free_params_init = self.cell_init[0:3]
-            elif self.lattice_system == "Monoclinic":
-                self.free_params_init = jnp.array(
-                    [
-                        self.cell_init[0],
-                        self.cell_init[1],
-                        self.cell_init[2],
-                        self.cell_init[4],
-                    ]
-                )
-            else:
-                self.free_params_init = self.cell_init
+                self.cell_init = jnp.array(cell_params)
+                self.free_params_init = self.cell_init[Lattice.get_active_indices(self.lattice_system)]
 
         if goniometer_axes is not None:
             axes = jnp.array(goniometer_axes)
@@ -438,7 +402,9 @@ class VectorizedObjective:
 
         # Reference Pool Norms for Sinkhorn
         # Use padded pool to match chunked indexing in sinkhorn
-        pad_len = (icfg.chunk_size - (hkl_pool.shape[1] % icfg.chunk_size)) % icfg.chunk_size
+        pad_len = (
+            icfg.chunk_size - (hkl_pool.shape[1] % icfg.chunk_size)
+        ) % icfg.chunk_size
         hkl_pool_padded = (
             jnp.pad(hkl_pool, ((0, 0), (0, pad_len)), constant_values=0)
             if pad_len > 0
@@ -456,7 +422,12 @@ class VectorizedObjective:
 
         if self.refine_lattice:
             n_lat = self.free_params_init.size
-            cell_params_norm = x[:, idx : idx + n_lat]
+            cell_params_norm = reconstruct_cell_params(
+                x[:, idx : idx + n_lat],
+                self.lattice_system,
+                self.free_params_init,
+                self.lattice_bound_frac,
+            )
             B = LatticeSOA.compute_B_batched(cell_params_norm)
             idx += n_lat
             # Broadcase UB calculation: (S, 3, 3) @ (S, 3, 3) -> (S, 3, 3)
@@ -498,76 +469,33 @@ class VectorizedObjective:
 
             offsets_delta = _forward_map_param(gonio_norm, self.goniometer_bound_deg)
             offsets_total = self.gonio_nominal_offsets + offsets_delta
-            R = self.compute_goniometer_R_jax(
-                gonio_norm
-            )  # Helper assumes input is norm
+            R = compute_goniometer_R(
+                gonio_norm,
+                self.goniometer_bound_deg,
+                self.gonio_nominal_offsets,
+                self.gonio_angles,
+                self.gonio_axes,
+                self.num_gonio_axes,
+            )
         elif self.gonio_axes is not None:
             offsets_total = self.gonio_nominal_offsets[None, :].repeat(
                 x.shape[0], axis=0
             )
             # To calculate R from Nominal (fixed), we pass 0.5 to helper
             gonio_norm = jnp.full((x.shape[0], self.num_gonio_axes), 0.5)
-            R = self.compute_goniometer_R_jax(gonio_norm)
+            R = compute_goniometer_R(
+                gonio_norm,
+                self.goniometer_bound_deg,
+                self.gonio_nominal_offsets,
+                self.gonio_angles,
+                self.gonio_axes,
+                self.num_gonio_axes,
+            )
         else:
             offsets_total = None
             R = None
 
         return UB, B, sample_total, ki_vec, offsets_total, R
-
-    def reconstruct_cell_params(self, params_norm):
-        p_free = _forward_map_lattice(
-            params_norm, self.free_params_init, self.lattice_bound_frac
-        )
-        S = params_norm.shape[0]
-        deg90 = jnp.full((S,), 90.0)
-        deg120 = jnp.full((S,), 120.0)
-        if self.lattice_system == "Cubic":
-            a = p_free[:, 0]
-            return jnp.stack([a, a, a, deg90, deg90, deg90], axis=1)
-        if self.lattice_system == "Hexagonal":
-            a, c = p_free[:, 0], p_free[:, 1]
-            return jnp.stack([a, a, c, deg90, deg90, deg120], axis=1)
-        if self.lattice_system == "Tetragonal":
-            a, c = p_free[:, 0], p_free[:, 1]
-            return jnp.stack([a, a, c, deg90, deg90, deg90], axis=1)
-        if self.lattice_system == "Rhombohedral":
-            a, alpha = p_free[:, 0], p_free[:, 1]
-            return jnp.stack([a, a, a, alpha, alpha, alpha], axis=1)
-        if self.lattice_system == "Orthorhombic":
-            a, b, c = p_free[:, 0], p_free[:, 1], p_free[:, 2]
-            return jnp.stack([a, b, c, deg90, deg90, deg90], axis=1)
-        if self.lattice_system == "Monoclinic":
-            a, b, c, beta = (
-                p_free[:, 0],
-                p_free[:, 1],
-                p_free[:, 2],
-                p_free[:, 3],
-            )
-            return jnp.stack([a, b, c, deg90, beta, deg90], axis=1)
-        return p_free
-
-    def compute_goniometer_R_jax(self, gonio_offsets_norm):
-        # NOTE: This helper uses Norm to calc Delta, then adds Nominal from self.
-        offsets_delta = _forward_map_param(
-            gonio_offsets_norm, self.goniometer_bound_deg
-        )
-        total_offsets = self.gonio_nominal_offsets + offsets_delta
-
-        angles_deg = total_offsets[:, :, None] + self.gonio_angles[None, :, :]
-        S, M = total_offsets.shape[0], self.gonio_angles.shape[1]
-        R = jnp.eye(3)[None, None, ...].repeat(S, axis=0).repeat(M, axis=1)
-        deg2rad = jnp.pi / 180.0
-        for i in range(self.num_gonio_axes):
-            axis_spec = self.gonio_axes[i]
-            direction = axis_spec[0:3]
-            sign = axis_spec[3]
-            theta = sign * angles_deg[:, i, :] * deg2rad
-            Ri = rotation_from_axis_angle(direction, theta)
-            # Mantid SetGoniometer: R = R0 @ R1 @ R2
-            # Each Ri should be multiplied on the RIGHT of the current accumulated matrix.
-            # Batched matmul: (S, M, 3, 3) @ (S, M, 3, 3) -> (S, M, 3, 3)
-            R = jnp.matmul(R, Ri)
-        return R
 
     @partial(jax.jit, static_argnames="self")
     def get_results(self, x):
@@ -581,6 +509,26 @@ class VectorizedObjective:
         x_pad = jnp.pad(x, ((0, pad_size), (0, 0)), mode="edge")
 
         UB, _, sample_total, ki_vec, _, R = self._get_physical_params_jax(x_pad)
+        # UB, _, sample_total, ki_vec, _, R = get_physical_params(
+        #     x_pad,
+        #     self.refine_lattice,
+        #     self.free_params_init,
+        #     self.static_B,
+        #     self.refine_sample,
+        #     self.sample_bound,
+        #     self.sample_nominal,
+        #     self.refine_beam,
+        #     self.beam_bound_deg,
+        #     self.beam_nominal,
+        #     self.refine_goniometer,
+        #     self.num_gonio_axes,
+        #     self.num_active_gonio,
+        #     self.gonio_mask,
+        #     self.goniometer_bound_deg,
+        #     self.gonio_nominal_offsets,
+        #     self.gonio_angles,
+        #     self.gonio_axes,
+        # )
 
         # Determine current rotations (Lab -> Sample)
         R_curr = R  # (S, N_runs, 3, 3) or None
