@@ -1,4 +1,5 @@
 from dataclasses import dataclass, fields, field, replace, asdict, astuple
+
 # from enum import IntFlag, auto
 from typing import Optional, List
 
@@ -287,6 +288,15 @@ class UBSolver:
             )
             x0 = None
 
+        # NOTE(vivek): remove goniometer_* as inputs to solve? 
+        gonio = replace(
+            state.goniometer,
+            axes=goniometer_axes if goniometer_axes is not None else state.goniometer.axes,
+            angles=goniometer_angles if goniometer_angles is not None else state.goniometer.angles,
+            names=goniometer_names if goniometer_names is not None else state.goniometer.names,
+        )
+        target_state = replace(target_state, goniometer=gonio)
+
         rcfg = self._refinement_cfg
         icfg = self._indexing_cfg
         scfg = self._solver_cfg
@@ -296,7 +306,6 @@ class UBSolver:
         result = _jax_minimize(
             state=target_state,
             init_params=x0,
-
             rcfg=rcfg,
             icfg=icfg,
             scfg=scfg,
