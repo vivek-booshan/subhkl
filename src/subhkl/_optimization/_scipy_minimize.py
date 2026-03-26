@@ -8,9 +8,9 @@ from subhkl.core.models import LATTICE_CONFIG
 from subhkl.core.experiment import ExperimentData
 from subhkl.core.spacegroup import get_centering
 from subhkl.instrument.detector import scattering_vector_from_angles
-from subhkl._optimization.optimization import VectorizedObjective 
+from subhkl._optimization import VectorizedObjective 
 
-from subhkl._optimization.solver import Result
+from ._types import Result
 
 def _minimize_scipy(
     state: ExperimentData,

@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation
 from subhkl.io.loader import ExperimentLoader
 from subhkl.core import Lattice
 from subhkl._optimization import UBSolver, VectorizedObjective
-from subhkl._optimization.solver import RefinementConfig,IndexingConfig
+from subhkl._optimization import RefinementConfig,IndexingConfig
 
 
 def generate_synthetic_data(

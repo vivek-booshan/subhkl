@@ -11,7 +11,7 @@ from subhkl.core.spacegroup import generate_hkl_mask, get_centering
 from subhkl.instrument.detector import scattering_vector_from_angles
 
 from ._helpers import get_physical_params
-from .solver import RefinementConfig, IndexingConfig
+from ._types import RefinementConfig, IndexingConfig
 
 
 class VectorizedObjective:

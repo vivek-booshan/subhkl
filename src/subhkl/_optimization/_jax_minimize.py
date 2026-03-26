@@ -14,7 +14,7 @@ from subhkl.core.math import rotation_from_rodrigues
 
 from ._helpers import get_physical_params
 from .optimization import VectorizedObjective
-from .solver import RefinementConfig, IndexingConfig, SolverConfig, Result
+from ._types import RefinementConfig, IndexingConfig, SolverConfig, Result
 
 
 def _jax_minimize(
