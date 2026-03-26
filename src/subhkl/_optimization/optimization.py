@@ -1,12 +1,14 @@
-import warnings
+from dataclasses import replace
+from typing import Optional
 from functools import partial
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from subhkl.core import Lattice
-from subhkl.core.spacegroup import generate_hkl_mask
+from subhkl.core import Lattice, ExperimentData
+from subhkl.core.spacegroup import generate_hkl_mask, get_centering
+from subhkl.instrument.detector import scattering_vector_from_angles
 
 from ._helpers import get_physical_params
 from .solver import RefinementConfig, IndexingConfig
@@ -15,347 +17,247 @@ from .solver import RefinementConfig, IndexingConfig
 class VectorizedObjective:
     def __init__(
         self,
-        B,
-        kf_ki_dir,
-        peak_xyz_lab,
-        wavelength,
-        angle_cdf,
-        angle_t,
-        weights=None,
-        cell_params=None,
+        state: ExperimentData,
         rcfg: RefinementConfig = RefinementConfig(),
         icfg: IndexingConfig = IndexingConfig(),
-        lattice_system="Triclinic",
-        goniometer_axes=None,
-        goniometer_angles=None,
-        goniometer_refine_mask=None,
-        goniometer_nominal_offsets=None,
-        sample_nominal=None,
-        beam_nominal=None,
-        peak_radii=None,
-        space_group="P 1",
-        centering="P",
-        static_R=None,
-        kf_lab_fixed_vectors=None,
-        peak_run_indices=None,
     ):
-        self.B = jnp.array(B)
-        self.kf_ki_dir_init = jnp.array(kf_ki_dir)
-        if self.kf_ki_dir_init.ndim == 2:
-            if self.kf_ki_dir_init.shape[0] != 3 and self.kf_ki_dir_init.shape[1] == 3:
-                self.kf_ki_dir_init = self.kf_ki_dir_init.T
+        ## CONFIGURATION & FLAGS
+        # Extract data availability
+        # Determine actual refinement capability (Data vs Request)
+        has_xyz = state.peaks.xyz is not None
+        self.refine_lattice = rcfg.refine_lattice
+        self.refine_goniometer = rcfg.refine_goniometer
+        self.refine_sample = rcfg.refine_sample and has_xyz
+        self.refine_beam = rcfg.refine_beam and has_xyz
 
-        self.k_sq_init = jnp.sum(self.kf_ki_dir_init**2, axis=0)
-        num_peaks = self.kf_ki_dir_init.shape[1]
+        self.rcfg = replace(
+            rcfg, refine_sample=self.refine_sample, refine_beam=self.refine_beam
+        )
+        self.icfg = icfg
 
-        self.centering = centering
-
-        # Convert tolerance from degrees to radians
+        # Global Algorithm Settings
+        self.tolerance_deg = icfg.tolerance_deg
         self.tolerance_rad = jnp.deg2rad(icfg.tolerance_deg)
+        self.loss_method = icfg.loss_method
+        self.space_group = state.space_group
+        self.centering = get_centering(state.space_group)
 
-        # FIX: Handle Static Rotation (R) correctly
-        if static_R is not None:
-            self.static_R = jnp.array(static_R)
-        else:
-            self.static_R = jnp.eye(3)
+        # Mathematical Constants
+        t_arr = np.linspace(0, np.pi, 1024)
+        self.angle_cdf = (t_arr - np.sin(t_arr)) / np.pi
+        self.angle_t = t_arr
 
-        # Handle Peak-to-Run mapping metadata
-        if peak_run_indices is not None:
-            self.peak_run_indices = jnp.array(peak_run_indices, dtype=jnp.int32)
-            # Validation: Ensure R stack is large enough for the max run_index
-            if self.static_R.ndim == 3:
-                max_run = jnp.max(self.peak_run_indices)
-                num_rot = self.static_R.shape[0]
-                if max_run >= num_rot:
-                    # If we only have ONE rotation, broadcast it to match the peaks
-                    if num_rot == 1:
-                        self.static_R = jnp.tile(self.static_R, (max_run + 1, 1, 1))
-                    else:
-                        # Major mismatch: Force everything to run 0 to prevent crash, but warn
-                        # (JAX doesn't warn easily in JIT, so we'll just clamp later)
-                        pass
-        # Default heuristic:
-        # 1. If R is a stack of N rotations and we have N peaks, assume 1-to-1 mapping.
-        elif self.static_R.ndim == 3:
-            num_rotations = self.static_R.shape[0]
-            if num_rotations == num_peaks:
-                self.peak_run_indices = jnp.arange(num_peaks, dtype=jnp.int32)
-            else:
-                # Fallback: everything to run 0 if we can't decide
-                self.peak_run_indices = jnp.zeros(num_peaks, dtype=jnp.int32)
-        else:
-            self.peak_run_indices = jnp.zeros(num_peaks, dtype=jnp.int32)
+        ## LATTICE
+        lattice = state.lattice
+        self.B = lattice.get_b_matrix()
+        self.cell_init = lattice.to_jax()
+        self.lattice_system, num_lattice_params = Lattice.infer_system(
+            lattice, state.space_group
+        )
+        self.lattice_bound_frac = rcfg.lattice_bound_frac
 
-        # Final safety: Clamp run indices to R stack bounds to prevent UB in JAX
+        # Initialize lattice search vectors
+        active_idx = Lattice.get_active_indices(self.lattice_system)
+        self.free_params_init = self.cell_init[jnp.array(active_idx)]
+
+        ## PEAKS and BEAM
+        peaks = state.peaks
+        self.kf_ki_dir = scattering_vector_from_angles(peaks.two_theta, peaks.azimuthal)
+        if self.kf_ki_dir.ndim == 2 and self.kf_ki_dir.shape[0] != 3:
+            self.kf_ki_dir = self.kf_ki_dir.T
+
+        self.num_obs = self.kf_ki_dir.shape[1]
+        self.k_sq_init = jnp.sum(self.kf_ki_dir**2, axis=0)
+
+        # Detector/Sample Geometry
+        self.peak_xyz = jnp.array(peaks.xyz).T if has_xyz else None
+        self.sample_nominal = (
+            jnp.array(state.base_sample_offset)
+            if state.base_sample_offset is not None
+            else jnp.zeros(3)
+        )
+        self.sample_bound = rcfg.sample_bound_meters
+
+        self.beam_nominal = (
+            jnp.array(state.ki_vec)
+            if state.ki_vec is not None
+            else jnp.array([0.0, 0.0, 1.0])
+        )
+        self.beam_bound_deg = rcfg.beam_bound_deg
+
+        # Peak weighting/physics metadata
+        self.weights = jnp.array(peaks.refine_weights(icfg.B_sharpen)).flatten()
+        self.peak_radii = (
+            jnp.array(peaks.radius).flatten()
+            if peaks.radius is not None
+            else jnp.zeros(self.num_obs)
+        )
+        self.max_score = jnp.sum(self.weights)
+
+        ## Goniometer and run mapping
+        goniometer = state.goniometer
+        raw_angles = goniometer.angles.T if goniometer.angles is not None else None
+
+        # Map Lab -> Sample frames
+        resolved_angles, static_R, peak_run_indices = _resolve_goniometer_mapping(
+            state, self.num_obs, raw_angles
+        )
+
+        self.static_R = jnp.array(static_R) if static_R is not None else jnp.eye(3)
+        self.peak_run_indices = (
+            jnp.array(peak_run_indices, dtype=jnp.int32)
+            if peak_run_indices is not None
+            else jnp.zeros(self.num_obs, dtype=jnp.int32)
+        )
+
+        # Finalize Static_R Broadcasting and Index Clamping
         if self.static_R.ndim == 3:
+            num_rot = self.static_R.shape[0]
+            max_run = jnp.max(self.peak_run_indices)
+            if max_run >= num_rot and num_rot == 1:
+                self.static_R = jnp.tile(self.static_R, (max_run + 1, 1, 1))
             self.peak_run_indices = jnp.clip(
                 self.peak_run_indices, 0, self.static_R.shape[0] - 1
             )
 
-        if peak_xyz_lab is not None:
-            # peak_xyz_lab is (N, 3) or (3, N). We want (3, N).
-            p_xyz = jnp.array(peak_xyz_lab)
-            if p_xyz.shape[0] != 3 and p_xyz.shape[1] == 3:
-                p_xyz = p_xyz.T
-            self.peak_xyz = p_xyz
-        else:
-            self.peak_xyz = None
+        # Goniometer Refinement Logic
+        if goniometer.axes is not None:
+            self.gonio_axes = jnp.array(goniometer.axes)
+            if self.gonio_axes.ndim == 2 and self.gonio_axes.shape[1] == 3:
+                self.gonio_axes = jnp.concatenate(
+                    [self.gonio_axes, jnp.ones((self.gonio_axes.shape[0], 1))], axis=1
+                )
 
-        self.refine_sample = rcfg.refine_sample
-        self.sample_bound = rcfg.sample_bound_meters
-        if sample_nominal is None:
-            self.sample_nominal = jnp.zeros(3)
-        else:
-            self.sample_nominal = jnp.array(sample_nominal)
+            self.gonio_angles = (
+                jnp.array(resolved_angles).T
+                if jnp.array(resolved_angles).ndim == 2
+                and jnp.array(resolved_angles).shape[0] != self.gonio_axes.shape[0]
+                else jnp.array(resolved_angles)
+            )
+            self.num_gonio_axes = self.gonio_axes.shape[0]
+            self.gonio_nominal_offsets = (
+                jnp.array(goniometer.base_offsets)
+                if goniometer.base_offsets is not None
+                else jnp.zeros(self.num_gonio_axes)
+            )
+            self.goniometer_bound_deg = rcfg.goniometer_bound_deg
 
-        self.refine_beam = rcfg.refine_beam
-        self.beam_bound_deg = rcfg.beam_bound_deg
-        if beam_nominal is None:
-            self.beam_nominal = jnp.array([0.0, 0.0, 1.0])
+            # Masking
+            gonio_names = goniometer.names
+            if (
+                self.refine_goniometer
+                and rcfg.refine_goniometer_axes is not None
+                and gonio_names
+            ):
+                self.gonio_mask = np.array(
+                    [
+                        any(req in n for req in rcfg.refine_goniometer_axes)
+                        for n in gonio_names
+                    ],
+                    dtype=bool,
+                )
+            else:
+                self.gonio_mask = np.ones(self.num_gonio_axes, dtype=bool)
+            self.num_active_gonio = int(np.sum(self.gonio_mask))
         else:
-            self.beam_nominal = jnp.array(beam_nominal)
+            self.gonio_axes = None
+            self.num_gonio_axes = self.num_active_gonio = 0
+            self.gonio_mask = jnp.array([], dtype=bool)
+            self.gonio_nominal_offsets = self.gonio_min = self.gonio_max = jnp.array([])
+            self.gonio_angles = jnp.empty((0, self.num_obs))
 
-        # Reconstruct kf from Q (kf = Q + ki)
+        ## SOLVER STATE SPACE (# of DIMS)
+        dims = 3  # Orientation (Rodrigues)
+        dims += num_lattice_params if self.refine_lattice else 0
+        dims += 3 if self.refine_sample else 0
+        dims += 2 if self.refine_beam else 0
+        dims += self.num_active_gonio if self.refine_goniometer else 0
+        self.num_dims = dims
+
+        ## OPTICAL RECONSTRUCTION (KF_LAB)
         self.kf_lab_fixed = None
         if self.peak_xyz is not None:
-            # Always calculate kf from physical detector positions and sample offset
-            # peak_xyz is (3, N), sample_nominal is (3,)
             v = self.peak_xyz - self.sample_nominal[:, None]
             dist = jnp.linalg.norm(v, axis=0)
             self.kf_lab_fixed = v / jnp.where(dist == 0, 1.0, dist[None, :])
-            # Input is in LAB frame, so it is NOT yet rotated to Sample frame.
-
-        if kf_lab_fixed_vectors is not None and self.kf_lab_fixed is None:
-            # Input was Lab Frame. Q_lab = kf_lab - ki_lab.
-            q_vecs = jnp.array(kf_lab_fixed_vectors)
-            if q_vecs.shape[0] != 3 and q_vecs.shape[1] == 3:
-                q_vecs = q_vecs.T
+        else:
+            # Fallback to Lab vectors if XYZ detector geometry is missing
+            q_vecs = self.kf_ki_dir
             self.kf_lab_fixed = q_vecs + self.beam_nominal[:, None]
-            self.kf_lab_fixed = self.kf_lab_fixed / jnp.linalg.norm(
-                self.kf_lab_fixed, axis=0
-            )
+            self.kf_lab_fixed /= jnp.linalg.norm(self.kf_lab_fixed, axis=0)
 
-        if self.kf_lab_fixed is None:
-            # Fallback
-            q_vecs = self.kf_ki_dir_init
-            if q_vecs.shape[0] != 3 and q_vecs.shape[1] == 3:
-                q_vecs = q_vecs.T
-            self.kf_lab_fixed = q_vecs + self.beam_nominal[:, None]
-            self.kf_lab_fixed = self.kf_lab_fixed / jnp.linalg.norm(
-                self.kf_lab_fixed, axis=0
-            )
-            # FIX: Lab angles (two_theta, azimuthal) are ALWAYS in Lab frame.
-            # We must ensure the optimizer
-            # applies the Lab -> Sample rotation (R^T) during objective evaluation.
-
-        self.tolerance_deg = icfg.tolerance_deg
-        self.loss_method = icfg.loss_method
-        self.angle_cdf = jnp.array(angle_cdf)
-        self.angle_t = jnp.array(angle_t)
-        self.space_group = space_group
-
-        self.refine_lattice = rcfg.refine_lattice
-        self.lattice_system = lattice_system
-        self.lattice_bound_frac = rcfg.lattice_bound_frac
-        self.refine_goniometer = rcfg.refine_goniometer
-        self.goniometer_bound_deg = rcfg.goniometer_bound_deg
-
-        self.free_params_init = None
-        if self.refine_lattice:
-            if cell_params is None:
-                self.cell_init = jnp.array(cell_params)
-                self.free_params_init = self.cell_init[Lattice.get_active_indices(self.lattice_system)]
-
-        if goniometer_axes is not None:
-            axes = jnp.array(goniometer_axes)
-            if axes.ndim == 2 and axes.shape[1] == 3:
-                # Fallback for 3-component axes: add 1.0 orientation (CCW)
-                axes = jnp.concatenate([axes, jnp.ones((axes.shape[0], 1))], axis=1)
-            self.gonio_axes = axes
-
-            angles = jnp.array(goniometer_angles)
-            if angles.ndim == 2:
-                # Expecting (num_axes, num_runs). If (num_runs, num_axes), transpose.
-                if (
-                    angles.shape[0] != self.gonio_axes.shape[0]
-                    and angles.shape[1] == self.gonio_axes.shape[0]
-                ):
-                    angles = angles.T
-            self.gonio_angles = angles
-            self.num_gonio_axes = self.gonio_axes.shape[0]
-
-            # CRITICAL: If gonio_angles is per-peak, force per-peak run mapping
-            # to ensure R_per_peak = R[peak_run_indices] works correctly.
-            if self.gonio_angles.shape[1] == num_peaks:
-                self.peak_run_indices = jnp.arange(num_peaks, dtype=jnp.int32)
-
-            if goniometer_refine_mask is not None:
-                self.gonio_mask = np.array(goniometer_refine_mask, dtype=bool)
-            else:
-                self.gonio_mask = np.ones(self.num_gonio_axes, dtype=bool)
-            self.num_active_gonio = np.sum(self.gonio_mask)
-
-            if goniometer_nominal_offsets is None:
-                self.gonio_nominal_offsets = jnp.zeros(self.num_gonio_axes)
-            else:
-                self.gonio_nominal_offsets = jnp.array(goniometer_nominal_offsets)
-
-            self.gonio_min = jnp.full(self.num_gonio_axes, -rcfg.goniometer_bound_deg)
-            self.gonio_max = jnp.full(self.num_gonio_axes, rcfg.goniometer_bound_deg)
-        else:
-            self.gonio_axes = None
-            self.num_gonio_axes = 0
-            self.num_active_gonio = 0
-            self.gonio_mask = jnp.array([], dtype=bool)
-            self.gonio_nominal_offsets = jnp.array([])
-            self.gonio_min = jnp.array([])
-            self.gonio_max = jnp.array([])
-            self.gonio_angles = jnp.empty((0, num_peaks))
-
-        wavelength = jnp.array(wavelength)
-        self.wl_min_val = wavelength[0]
-        self.wl_max_val = wavelength[1]
-        self.num_candidates = 64
-
-        if weights is None:
-            self.weights = jnp.ones(num_peaks)
-        else:
-            self.weights = jnp.array(weights).flatten()
-            if self.weights.shape[0] != num_peaks:
-                raise ValueError(
-                    f"Weights shape {self.weights.shape} does not match num_peaks {num_peaks}"
-                )
-
-        if peak_radii is None:
-            self.peak_radii = jnp.zeros(num_peaks)
-        else:
-            self.peak_radii = jnp.array(peak_radii).flatten()
-            if self.peak_radii.shape[0] != num_peaks:
-                raise ValueError(
-                    f"Peak radii shape {self.peak_radii.shape} does not match num_peaks {num_peaks}"
-                )
-
-        self.max_score = jnp.sum(self.weights)
+        ## SEARCH POOL & HKL POOL GENERATION
         self.d_min = icfg.d_min if icfg.d_min is not None else 0.0
         self.d_max = icfg.d_max if icfg.d_max is not None else 1000.0
         self.search_window_size = icfg.search_window_size
         self.window_batch_size = icfg.window_batch_size
-
         self.chunk_size = icfg.chunk_size
         self.num_iters = icfg.num_iters
         self.top_k = icfg.top_k
+        self.wl_min_val, self.wl_max_val = jnp.array(state.wavelength)
+        self.num_candidates = 64
 
-        # --- Search Window Heuristic Warning ---
-        if self.loss_method == "forward":
-            # Calculate Volume (Real Space) from B matrix (Reciprocal Basis, 2pi included)
-            # V_real = (2pi)^3 / det(B)
-            det_B = float(np.abs(np.linalg.det(self.B)))
-            if det_B > 1e-9:
-                vol_real = 1.0 / det_B
-                # Peak Density Heuristic: N approx Vol / d^3
-                # Factor 0.0025 empirically determined for +/- 2 deg coverage on MANDI
-                heuristic_win = int((vol_real / (self.d_min**3)) * 0.0025)
-                # Clamp for sanity in warning logic
-                heuristic_win = max(64, heuristic_win)
-
-                if self.search_window_size < (heuristic_win * 0.75):
-                    warnings.warn(
-                        f"\n[WARNING] search_window_size ({self.search_window_size}) is likely too small "
-                        f"for resolution {self.d_min:.2f}A and Volume {vol_real:.0f}A^3.\n"
-                        f"Binary search indexer may miss valid peaks.\n"
-                        f"RECOMMENDED SIZE: >= {heuristic_win}\n",
-                        stacklevel=2,
-                    )
-
-        # --- HKL Mask Generation ---
-        # Robustly determine search range from cell and observed resolution
-        # inv(B @ B.T) = inv(G*) = G (Real space metric tensor)
-        # sqrt(diag(G)) = [a, b, c]
+        # HKL Range Calculation
         a_real, b_real, c_real = jnp.sqrt(jnp.diag(jnp.linalg.inv(self.B @ self.B.T)))
+        q_obs_max = jnp.max(jnp.linalg.norm(self.kf_ki_dir, axis=0))
+        d_limit = self.d_min if self.d_min > 0 else 1.0 / (q_obs_max + 1e-9)
 
-        # Calculate resolution of observed peaks
-        q_obs_max = jnp.max(jnp.linalg.norm(self.kf_ki_dir_init, axis=0))
-        d_min_obs = 1.0 / (q_obs_max + 1e-9)
+        h_max = min(max(icfg.hkl_search_range, int(jnp.ceil(a_real / d_limit))), 64)
+        k_max = min(max(icfg.hkl_search_range, int(jnp.ceil(b_real / d_limit))), 64)
+        l_max = min(max(icfg.hkl_search_range, int(jnp.ceil(c_real / d_limit))), 64)
 
-        # Determine pool resolution limit
-        d_limit = self.d_min if self.d_min > 0 else d_min_obs
-
-        # h_max = a / d_min
-        h_max_res = int(jnp.ceil(a_real / d_limit))
-        k_max_res = int(jnp.ceil(b_real / d_limit))
-        l_max_res = int(jnp.ceil(c_real / d_limit))
-        h_max = max(icfg.hkl_search_range, h_max_res)
-        k_max = max(icfg.hkl_search_range, k_max_res)
-        l_max = max(icfg.hkl_search_range, l_max_res)
-
-        # Clamp to a reasonable maximum to prevent OOM
-        h_max = min(h_max, 64)
-        k_max = min(k_max, 64)
-        l_max = min(l_max, 64)
-
-        print(
-            f"Generating HKL pool for Space Group: {self.space_group} (Range: {h_max},{k_max},{l_max})"
+        # Pool Generation
+        r_h, r_k, r_l = (
+            jnp.arange(-h_max, h_max + 1),
+            jnp.arange(-k_max, k_max + 1),
+            jnp.arange(-l_max, l_max + 1),
         )
-
-        r_h = jnp.arange(-h_max, h_max + 1)
-        r_k = jnp.arange(-k_max, k_max + 1)
-        r_l = jnp.arange(-l_max, l_max + 1)
-        h, k, l = jnp.meshgrid(r_h, r_k, r_l, indexing="ij")  # noqa: E741
+        h, k, l = jnp.meshgrid(r_h, r_k, r_l, indexing="ij")
         hkl_pool = jnp.stack([h.flatten(), k.flatten(), l.flatten()], axis=0)
 
-        # Apply Symmetry Mask to Pool
         mask_cpu = generate_hkl_mask(h_max, k_max, l_max, self.space_group)
-        self.valid_hkl_mask = jnp.array(mask_cpu)
         self.mask_range_h = h_max
         self.mask_range_k = k_max
         self.mask_range_l = l_max
-        self.mask_range = self.mask_range_h
+        self.mask_range = self.mask_range_h 
+        self.valid_hkl_mask = jnp.array(mask_cpu)
+        allowed = self.valid_hkl_mask[
+            hkl_pool[0] + h_max, hkl_pool[1] + k_max, hkl_pool[2] + l_max
+        ]
+        self.pool_hkl_flat = hkl_pool[:, allowed]
 
-        idx_h = hkl_pool[0] + h_max
-        idx_k = hkl_pool[1] + k_max
-        idx_l = hkl_pool[2] + l_max
-        allowed_pool = self.valid_hkl_mask[idx_h, idx_k, idx_l]
-
-        hkl_pool = hkl_pool[:, allowed_pool]
-        q_cart = self.B @ hkl_pool
-
-        # NOTE: For Sinkhorn, we keep the flat pool available directly
-        self.pool_hkl_flat = hkl_pool
-
+        # Sorting for search efficiency
+        q_cart = self.B @ self.pool_hkl_flat
         phis = jnp.arctan2(q_cart[1], q_cart[0])
         sort_idx = jnp.argsort(phis)
         self.pool_phi_sorted = phis[sort_idx]
-        self.pool_hkl_sorted = hkl_pool[:, sort_idx]
+        self.pool_hkl_sorted = self.pool_hkl_flat[:, sort_idx]
 
-        # --- PINNING INITIALIZATION ---
-        # Pre-calculate reference HKL and Q magnitudes to prevent lattice bias
-        # in derivative-free optimization. Assume identity orientation for pinning.
-        B_inv_init = jnp.linalg.inv(self.B)
-        h_init = B_inv_init @ self.kf_ki_dir_init
-        self.hkl_mag_sq_pinned = jnp.sum(h_init**2, axis=0, keepdims=True)
-        self.hkl_mag_sq_pinned = jnp.maximum(self.hkl_mag_sq_pinned, 1e-6)
+        ## PINNING & INITIAL HEURISTICS
+        B_inv = jnp.linalg.inv(self.B)
+        h_init = B_inv @ self.kf_ki_dir
+        self.hkl_mag_sq_pinned = jnp.maximum(
+            jnp.sum(h_init**2, axis=0, keepdims=True), 1e-6
+        )
 
-        # Reference Lambda for soft/binary kernels
-        # lambda = |k|^2 / (k . Q)
-        k_dot_q_init = jnp.sum(self.kf_ki_dir_init * self.kf_ki_dir_init, axis=0)
+        k_dot_q = jnp.sum(self.kf_ki_dir * self.kf_ki_dir, axis=0)
         self.safe_lamb_pinned = jnp.clip(
-            self.k_sq_init / jnp.maximum(k_dot_q_init, 1e-9),
+            self.k_sq_init / jnp.maximum(k_dot_q, 1e-9),
             self.wl_min_val,
             self.wl_max_val,
         )[None, :]
 
-        # Reference Pool Norms for Sinkhorn
-        # Use padded pool to match chunked indexing in sinkhorn
         pad_len = (
-            icfg.chunk_size - (hkl_pool.shape[1] % icfg.chunk_size)
+            icfg.chunk_size - (self.pool_hkl_flat.shape[1] % icfg.chunk_size)
         ) % icfg.chunk_size
-        hkl_pool_padded = (
-            jnp.pad(hkl_pool, ((0, 0), (0, pad_len)), constant_values=0)
+        hkl_padded = (
+            jnp.pad(self.pool_hkl_flat, ((0, 0), (0, pad_len)))
             if pad_len > 0
-            else hkl_pool
+            else self.pool_hkl_flat
         )
-        q_pool_init = self.B @ hkl_pool_padded
-        self.pool_norm_q_pinned = jnp.sqrt(jnp.sum(q_pool_init**2, axis=0) + 1e-9)
+        self.pool_norm_q_pinned = jnp.sqrt(
+            jnp.sum((self.B @ hkl_padded) ** 2, axis=0) + 1e-9
+        )
 
     @partial(jax.jit, static_argnames="self")
     def get_results(self, x):
@@ -368,7 +270,6 @@ class VectorizedObjective:
         pad_size = max(0, 2 - original_S)
         x_pad = jnp.pad(x, ((0, pad_size), (0, 0)), mode="edge")
 
-        # UB, _, sample_total, ki_vec, _, R = self._get_physical_params_jax(x_pad)
         UB, _, sample_total, ki_vec, _, R = get_physical_params(
             x_pad,
             self.refine_lattice,
@@ -573,3 +474,62 @@ class VectorizedObjective:
     def __call__(self, x):
         score, _, _, _ = self.get_results(x)
         return score
+
+def _resolve_goniometer_mapping(
+    state: ExperimentData, num_obs: int, goniometer_angles: Optional[np.ndarray]
+):
+    run_indices = state.run_indices
+    static_R_input = (
+        state.goniometer.rotation
+        if state.goniometer.rotation is not None
+        else np.eye(3)
+    )
+    if run_indices is not None:
+        num_runs_range = int(np.max(run_indices)) + 1
+        unique_runs, first_indices = np.unique(run_indices, return_index=True)
+
+        # Check for intra-run variations
+        def has_variation(data, indices):
+            if data is None:
+                return False
+            for r in unique_runs:
+                subset = data[indices == r]
+                if len(subset) > 1 and not np.allclose(subset, subset[0]):
+                    return True
+            return False
+
+        angles_per_peak = (
+            goniometer_angles is not None
+            and goniometer_angles.shape[1] == num_obs
+            and not has_variation(goniometer_angles.T, run_indices)
+        )
+        R_per_peak = (
+            state.goniometer.rotation is not None
+            and state.goniometer.rotation.ndim == 3
+            and state.goniometer.rotation.shape[0] == num_obs
+            and not has_variation(state.goniometer.rotation, run_indices)
+        )
+
+        if angles_per_peak:
+            new_angles = np.zeros((goniometer_angles.shape[0], num_runs_range))
+            new_angles[:] = goniometer_angles[:, first_indices[0:1]]
+            new_angles[:, unique_runs] = goniometer_angles[:, first_indices]
+            goniometer_angles = new_angles
+
+        if R_per_peak:
+            new_R = np.zeros((num_runs_range, 3, 3))
+            new_R[:] = state.goniometer.rotation[first_indices[0:1]]
+            new_R[unique_runs] = state.goniometer.rotation[first_indices]
+            static_R_input = new_R
+        elif (
+            state.goniometer.rotation is not None
+            and state.goniometer.rotation.ndim == 3
+            and state.goniometer.rotation.shape[0] == num_obs
+        ):
+            static_R_input = state.goniometer.rotation
+            run_indices = np.arange(num_obs, dtype=np.int32)
+
+        elif goniometer_angles is not None and goniometer_angles.shape[1] == num_obs:
+            run_indices = np.arange(num_obs, dtype=np.int32)
+
+        return goniometer_angles, static_R_input, run_indices

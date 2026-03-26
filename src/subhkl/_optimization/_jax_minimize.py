@@ -11,8 +11,6 @@ from tqdm import trange
 
 from subhkl.core import ExperimentData, Lattice
 from subhkl.core.math import rotation_from_rodrigues
-from subhkl.core.spacegroup import get_centering
-from subhkl.instrument.detector import scattering_vector_from_angles
 
 from ._helpers import get_physical_params
 from .optimization import VectorizedObjective
@@ -35,72 +33,14 @@ def _jax_minimize(
         "axes": rcfg.refine_goniometer_axes,
     }
 
-    goniometer_axes = state.goniometer.axes
-    goniometer_names = state.goniometer.names
-    goniometer_angles = (
-        state.goniometer.angles.T if state.goniometer.angles is not None else None
-    )
-
-    kf_ki_dir_lab = scattering_vector_from_angles(
-        state.peaks.two_theta, state.peaks.azimuthal
-    )
-    num_obs = kf_ki_dir_lab.shape[1]
-
-    goniometer_angles, static_R_input, run_indices = _resolve_goniometer_mapping(
-        state, num_obs, goniometer_angles
-    )
-    kf_ki_input = kf_ki_dir_lab
-
-    goniometer_refine_mask = None
-    if rflags["goniometer"] and rflags["axes"] is not None:
-        if goniometer_names is None:
-            print(
-                "Warning: refine_goniometer_axes provided but goniometer_names not found. Refining ALL."
-            )
-        else:
-            print(f"Refining specific goniometer axes: {rcfg.refine_goniometer_axes}")
-            goniometer_refine_mask = np.array(
-                [
-                    any(req in name for req in rflags["axes"])
-                    for name in goniometer_names
-                ],
-                dtype=bool,
-            )
-            print(
-                f"Goniometer Mask: {goniometer_refine_mask} (Names: {goniometer_names})"
-            )
-
-    lattice_system, num_lattice_params = Lattice.infer_system(
-        state.lattice, state.space_group
-    )
-
-    if rflags["lattice"]:
-        print("Lattice Refinement Enabled.")
-        print(
-            f"Detected System: {lattice_system} ({num_lattice_params} free parameters)."
-        )
-
     if icfg.loss_method == "forward" and (icfg.d_min is None or icfg.d_max is None):
         raise ValueError(
             "Need to supply --d_min and --d_max for loss_method=='forward'"
         )
 
-    # force false if peaks xyz not detected
-    has_xyz = state.peaks.xyz is not None
-    refine_sample_and_xyz = rflags["sample"] and has_xyz
-    refine_beam_and_xyz = rflags["beam"] and has_xyz
-
-    num_dims = 3
-    num_dims += num_lattice_params if rflags["lattice"] else 0
-    num_dims += 3 if refine_sample_and_xyz else 0
-    num_dims += 2 if refine_beam_and_xyz else 0
-
-    if rflags["goniometer"]:
-        num_dims += (
-            int(np.sum(goniometer_refine_mask))
-            if goniometer_refine_mask is not None
-            else len(goniometer_axes)
-        )
+    objective = VectorizedObjective(state, rcfg, icfg)
+    num_dims = objective.num_dims
+    num_obs = objective.num_obs
 
     start_sol_processed = None
     if init_params is not None:
@@ -135,37 +75,6 @@ def _jax_minimize(
 
     es_params = strategy.default_params
 
-    t_arr = np.linspace(0, np.pi, 1024)
-    angle_cdf = (t_arr - np.sin(t_arr)) / np.pi
-    angle_t = t_arr
-    obj_rcfg = replace(
-        rcfg, refine_sample=refine_sample_and_xyz, refine_beam=refine_beam_and_xyz
-    )
-    objective = VectorizedObjective(
-        state.lattice.get_b_matrix(),
-        kf_ki_input,
-        angle_cdf=angle_cdf,
-        angle_t=angle_t,
-        peak_xyz_lab=state.peaks.xyz,
-        wavelength=np.array(state.wavelength),
-        weights=state.peaks.refine_weights(icfg.B_sharpen),
-        space_group=state.space_group,
-        centering=get_centering(state.space_group),
-        cell_params=state.lattice.to_numpy(),
-        peak_radii=state.peaks.radius,
-        sample_nominal=state.base_sample_offset,
-        beam_nominal=state.ki_vec,
-        goniometer_nominal_offsets=state.goniometer.base_offsets,
-        lattice_system=lattice_system,
-        goniometer_axes=goniometer_axes,
-        goniometer_angles=goniometer_angles,
-        goniometer_refine_mask=goniometer_refine_mask,
-        rcfg=obj_rcfg,
-        icfg=icfg,
-        static_R=static_R_input,
-        kf_lab_fixed_vectors=kf_ki_dir_lab,
-        peak_run_indices=run_indices,
-    )
     print(
         f"Objective initialized with {icfg.loss_method} loss. Tolerance: {icfg.tolerance_deg} deg"
     )
@@ -341,9 +250,7 @@ def _jax_minimize(
     idx += 3
     U = jax.vmap(rotation_from_rodrigues)(rot_params[None])[0]
 
-    # U = objective.orientation_U_jax(rot_params[None])[0]
-
-    _print_refined_parameters(refined_state, rflags, goniometer_names)
+    _print_refined_parameters(refined_state, rflags, state.goniometer.names)
 
     # Final Score Recalculation using the unified pipeline
     score, accum_probs, hkl, lamb = objective.get_results(x_batch)
@@ -372,66 +279,6 @@ def _jax_minimize(
     )
 
     return result
-
-
-def _resolve_goniometer_mapping(
-    state: ExperimentData, num_obs: int, goniometer_angles: Optional[np.ndarray]
-):
-    run_indices = state.run_indices
-    static_R_input = (
-        state.goniometer.rotation
-        if state.goniometer.rotation is not None
-        else np.eye(3)
-    )
-    if run_indices is not None:
-        num_runs_range = int(np.max(run_indices)) + 1
-        unique_runs, first_indices = np.unique(run_indices, return_index=True)
-
-        # Check for intra-run variations
-        def has_variation(data, indices):
-            if data is None:
-                return False
-            for r in unique_runs:
-                subset = data[indices == r]
-                if len(subset) > 1 and not np.allclose(subset, subset[0]):
-                    return True
-            return False
-
-        angles_per_peak = (
-            goniometer_angles is not None
-            and goniometer_angles.shape[1] == num_obs
-            and not has_variation(goniometer_angles.T, run_indices)
-        )
-        R_per_peak = (
-            state.goniometer.rotation is not None
-            and state.goniometer.rotation.ndim == 3
-            and state.goniometer.rotation.shape[0] == num_obs
-            and not has_variation(state.goniometer.rotation, run_indices)
-        )
-
-        if angles_per_peak:
-            new_angles = np.zeros((goniometer_angles.shape[0], num_runs_range))
-            new_angles[:] = goniometer_angles[:, first_indices[0:1]]
-            new_angles[:, unique_runs] = goniometer_angles[:, first_indices]
-            goniometer_angles = new_angles
-
-        if R_per_peak:
-            new_R = np.zeros((num_runs_range, 3, 3))
-            new_R[:] = state.goniometer.rotation[first_indices[0:1]]
-            new_R[unique_runs] = state.goniometer.rotation[first_indices]
-            static_R_input = new_R
-        elif (
-            state.goniometer.rotation is not None
-            and state.goniometer.rotation.ndim == 3
-            and state.goniometer.rotation.shape[0] == num_obs
-        ):
-            static_R_input = state.goniometer.rotation
-            run_indices = np.arange(num_obs, dtype=np.int32)
-
-        elif goniometer_angles is not None and goniometer_angles.shape[1] == num_obs:
-            run_indices = np.arange(num_obs, dtype=np.int32)
-
-        return goniometer_angles, static_R_input, run_indices
 
 
 def _build_refined_state(state: ExperimentData, phys_results: tuple, refine: dict):
