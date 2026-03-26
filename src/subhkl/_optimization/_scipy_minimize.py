@@ -209,7 +209,7 @@ def _minimize_scipy(
 
     U_final = np.array(_rotation_matrix_from_rodrigues_numpy(final_x[:3]))
 
-    result = Result(num_indexed, hkl_final, lamda_final, U_final, final_x, state)
+    result = Result(num_indexed, hkl_final, lamda_final, U_final, final_x, refined_state)
     return result
 
 
