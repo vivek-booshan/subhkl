@@ -5,11 +5,6 @@ import numpy as np
 from subhkl.core.crystallography import Lattice
 from subhkl.core.experiment import PeaksData, ExperimentData
 from subhkl.instrument.goniometer import Goniometer
-from subhkl._optimization._helpers import (
-    _forward_map_lattice,
-    _forward_map_param, # only for legacy tests that need it
-    _inverse_map_param,
-)
 
 # NOTE(vivek): switch to builder api
 class FindUB:
@@ -90,8 +85,8 @@ class FindUB:
 
         When JAX is not available, falls back to SciPy's differential_evolution.
         """
-        from ._jax_minimize import _jax_minimize
-        (num_indexed, hkl, lamda, U, x), refined_state = _jax_minimize(
+        from .minimize import minimize
+        (num_indexed, hkl, lamda, U, x), refined_state = minimize(
             state=self.state,
             strategy_name=strategy_name,
             population_size=population_size,

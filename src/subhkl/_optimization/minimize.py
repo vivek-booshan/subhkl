@@ -17,7 +17,7 @@ from .optimization import VectorizedObjective
 from ._types import RefinementConfig, IndexingConfig, SolverConfig, Result
 
 
-def _jax_minimize(
+def minimize(
     state: ExperimentData,
     init_params: Optional[np.ndarray],
     rcfg: RefinementConfig,

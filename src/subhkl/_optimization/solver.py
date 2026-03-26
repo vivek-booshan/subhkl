@@ -301,9 +301,9 @@ class UBSolver:
         icfg = self._indexing_cfg
         scfg = self._solver_cfg
 
-        from ._jax_minimize import _jax_minimize
+        from .minimize import minimize
 
-        result = _jax_minimize(
+        result = minimize(
             state=target_state,
             init_params=x0,
             rcfg=rcfg,
