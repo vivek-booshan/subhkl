@@ -14,6 +14,7 @@ from subhkl.core.math import rotation_from_rodrigues
 from subhkl.core.spacegroup import get_centering
 from subhkl.instrument.detector import scattering_vector_from_angles
 
+from ._helpers import get_physical_params
 from .optimization import VectorizedObjective
 from .solver import RefinementConfig, IndexingConfig, SolverConfig, Result
 
@@ -145,7 +146,6 @@ def _jax_minimize(
         kf_ki_input,
         angle_cdf=angle_cdf,
         angle_t=angle_t,
-
         peak_xyz_lab=state.peaks.xyz,
         wavelength=np.array(state.wavelength),
         weights=state.peaks.refine_weights(icfg.B_sharpen),
@@ -156,15 +156,12 @@ def _jax_minimize(
         sample_nominal=state.base_sample_offset,
         beam_nominal=state.ki_vec,
         goniometer_nominal_offsets=state.goniometer.base_offsets,
-
         lattice_system=lattice_system,
         goniometer_axes=goniometer_axes,
         goniometer_angles=goniometer_angles,
         goniometer_refine_mask=goniometer_refine_mask,
-
         rcfg=obj_rcfg,
         icfg=icfg,
-
         static_R=static_R_input,
         kf_lab_fixed_vectors=kf_ki_dir_lab,
         peak_run_indices=run_indices,
@@ -317,7 +314,26 @@ def _jax_minimize(
         print(f"Best overall peaks: {-best_overall_fitness:.2f}")
 
     x_batch = jnp.array(best_overall_member[None, :])
-    phys_results = objective._get_physical_params_jax(x_batch)
+    phys_results = get_physical_params(
+        x_batch,
+        objective.refine_lattice,
+        objective.free_params_init,
+        objective.B,
+        objective.refine_sample,
+        objective.sample_bound,
+        objective.sample_nominal,
+        objective.refine_beam,
+        objective.beam_bound_deg,
+        objective.beam_nominal,
+        objective.refine_goniometer,
+        objective.num_gonio_axes,
+        objective.num_active_gonio,
+        objective.gonio_mask,
+        objective.goniometer_bound_deg,
+        objective.gonio_nominal_offsets,
+        objective.gonio_angles,
+        objective.gonio_axes,
+    )
     refined_state = _build_refined_state(state, phys_results, rflags)
 
     idx = 0

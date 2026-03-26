@@ -112,7 +112,7 @@ def get_physical_params(
     # Lattice Args
     refine_lattice: bool,
     free_params_init: jnp.ndarray,
-    static_B: jnp.ndarray,
+    B: jnp.ndarray,
     # Sample Args
     refine_sample: bool,
     sample_bound: float,
@@ -143,12 +143,12 @@ def get_physical_params(
     if refine_lattice:
         n_lat = free_params_init.size
         cell_params_norm = x[:, idx : idx + n_lat]
-        B = LatticeSOA.compute_B_batched(cell_params_norm)
+        _B = LatticeSOA.compute_B_batched(cell_params_norm)
         idx += n_lat
-        UB = jnp.matmul(U, B)
+        UB = jnp.matmul(U, _B)
     else:
-        B = static_B
-        UB = jnp.matmul(U, B[None, ...])
+        _B = B
+        UB = jnp.matmul(U, _B[None, ...])
 
     # 3. Sample
     if refine_sample:
@@ -213,5 +213,5 @@ def get_physical_params(
         offsets_total = None
         R = None
 
-    return UB, B, sample_total, ki_vec, offsets_total, R
+    return UB, _B, sample_total, ki_vec, offsets_total, R
 

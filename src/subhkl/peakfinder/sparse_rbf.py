@@ -1,25 +1,19 @@
 from functools import partial
 
+import jax
+import jax.numpy as jnp
+import jax.scipy.optimize
+import jax.scipy.signal
+
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
 from tqdm import tqdm
 
-# Import JAX with fallback from utils (centralized)
-from subhkl.utils.shim import (
-    HAS_JAX,
-    jax,
-    jit,
-    jnp,
-    jnp_update_add,
-    jnp_update_set,
-    lax,
-    vmap,
-)
+def jnp_update_add(arr, idx, val):
+    return arr.at[idx].add(val)
 
-if HAS_JAX:
-    import jax.scipy.optimize
-    import jax.scipy.signal
-
+def jnp_update_set(arr, idx, val):
+    return arr.at[idx].set(val)
 
 class SparseRBFPeakFinder:
     """
@@ -45,11 +39,6 @@ class SparseRBFPeakFinder:
         show_steps: bool = False,
         show_scale: str = "linear",
     ):
-        if not HAS_JAX:
-            raise ImportError(
-                "JAX is required for SparseRBFPeakFinder. "
-                'Install with: pip install -e ".[jax]" or pip install jax jaxlib'
-            )
         self.alpha = alpha
         self.gamma = gamma
         self.ref_sigma = 1.0  # Reference unit (1 pixel)
@@ -105,7 +94,7 @@ class SparseRBFPeakFinder:
                 x_grid, jnp.array([ri, ci_col]), si
             )
 
-        basis_stack = vmap(eval_one)(c, r, c_col, sigma)
+        basis_stack = jax.vmap(eval_one)(c, r, c_col, sigma)
         return jnp.sum(basis_stack, axis=0)
 
     @staticmethod
@@ -131,7 +120,7 @@ class SparseRBFPeakFinder:
     # =========================================================================
     # KERNEL 1: DENSE SOLVER
     # =========================================================================
-    @partial(jit, static_argnames=["self", "H", "W", "max_peaks_local"])
+    @partial(jax.jit, static_argnames=["self", "H", "W", "max_peaks_local"])
     def _solve_dense(self, image, H, W, max_peaks_local):
         bounds = (float(H), float(W), self.min_sigma, self.max_sigma)
         yy, xx = jnp.indices((H, W))
@@ -166,7 +155,7 @@ class SparseRBFPeakFinder:
                 c_init = jnp.maximum(residual[r_idx, c_idx], 0.0)
                 return weighted_score, jnp.array([c_init, r_idx, c_idx, s])
 
-            vals, candidates = vmap(check_sigma)(self.candidate_sigmas)
+            vals, candidates = jax.vmap(check_sigma)(self.candidate_sigmas)
             best_idx = jnp.argmax(vals)
             best_score = vals[best_idx]
             new_peak = candidates[best_idx]
@@ -198,14 +187,14 @@ class SparseRBFPeakFinder:
             params = run_opt(params)
             return (params, idx + 1), None
 
-        final_state, _ = lax.scan(step_fn, init_state, None, length=max_peaks_local)
+        final_state, _ = jax.lax.scan(step_fn, init_state, None, length=max_peaks_local)
         final_params, _ = final_state
         return final_params
 
     # =========================================================================
     # KERNEL 2: PATCHY SOLVER w/ HALO
     # =========================================================================
-    @partial(jit, static_argnames=["self", "Win_H", "Win_W", "Halo_P", "Refine_P"])
+    @partial(jax.jit, static_argnames=["self", "Win_H", "Win_W", "Halo_P", "Refine_P"])
     def _solve_patchy_window(
         self, window_with_halo, seeds, Win_H, Win_W, Halo_P, Refine_P
     ):
@@ -227,7 +216,7 @@ class SparseRBFPeakFinder:
             start_r = r_c - half_p
             start_c = c_c - half_p
 
-            patch = lax.dynamic_slice(
+            patch = jax.lax.dynamic_slice(
                 window_with_halo, (start_r, start_c), (Refine_P, Refine_P)
             )
             res = self._solve_dense(patch, Refine_P, Refine_P, 2)
@@ -243,7 +232,7 @@ class SparseRBFPeakFinder:
             mask = valid & (res[:, 0] > 1e-9)
             return jnp.where(mask[:, None], res, jnp.zeros_like(res))
 
-        results = vmap(process_one_seed)(seeds_halo_shifted)
+        results = jax.vmap(process_one_seed)(seeds_halo_shifted)
         return results.reshape(-1, 4)
 
     # =========================================================================
@@ -318,20 +307,20 @@ class SparseRBFPeakFinder:
 
             if level_idx == 0:
                 # BASE CASE: DENSE
-                @jit
+                @jax.jit
                 def extract_chunk_exact(b_idx, r_idx, c_idx):
                     r_pad = r_idx + PAD_GLOBAL
                     c_pad = c_idx + PAD_GLOBAL
 
                     def slice_one(bi, ri, ci):
-                        return lax.dynamic_slice(
+                        return jax.lax.dynamic_slice(
                             img_jax_padded[bi], (ri, ci), (w_h, w_w)
                         )
 
-                    return vmap(slice_one)(b_idx, r_pad, c_pad)
+                    return jax.vmap(slice_one)(b_idx, r_pad, c_pad)
 
                 print(f"  > Dense Search on {total_wins_all} windows...")
-                solver = jit(vmap(lambda w: self._solve_dense(w, w_h, w_w, 10)))
+                solver = jax.jit(jax.vmap(lambda w: self._solve_dense(w, w_h, w_w, 10)))
 
                 with tqdm(
                     total=total_wins_all, desc="Dense Search", unit="win"
@@ -358,7 +347,7 @@ class SparseRBFPeakFinder:
                 P = self.refine_patch_size
                 HALO = P // 2 + 1
 
-                @jit
+                @jax.jit
                 def extract_chunk_with_halo(b_idx, r_idx, c_idx):
                     r_pad = r_idx + PAD_GLOBAL - HALO
                     c_pad = c_idx + PAD_GLOBAL - HALO
@@ -366,14 +355,14 @@ class SparseRBFPeakFinder:
                     w_extract = w_w + 2 * HALO
 
                     def slice_one(bi, ri, ci):
-                        return lax.dynamic_slice(
+                        return jax.lax.dynamic_slice(
                             img_jax_padded[bi], (ri, ci), (h_extract, w_extract)
                         )
 
-                    return vmap(slice_one)(b_idx, r_pad, c_pad)
+                    return jax.vmap(slice_one)(b_idx, r_pad, c_pad)
 
-                solver = jit(
-                    vmap(
+                solver = jax.jit(
+                    jax.vmap(
                         lambda w, s: self._solve_patchy_window(w, s, w_h, w_w, HALO, P)
                     )
                 )

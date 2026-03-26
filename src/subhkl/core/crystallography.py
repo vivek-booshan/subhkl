@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import warnings
 
+import jax.numpy as jnp
+import jax.scipy.linalg as jsl
 import numpy as np
 import numpy.typing as npt
 import scipy.linalg
@@ -12,10 +14,6 @@ from subhkl.core.models import (
     LATTICE_CONFIG,
     LATTICE_CONSTRAINTS,
     SG_SYSTEM_MAP,
-)
-from subhkl.utils.shim import (
-    jnp,
-    jscipy_linalg as jsl,
 )
 
 

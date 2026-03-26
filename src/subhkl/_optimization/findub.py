@@ -1,6 +1,5 @@
 from dataclasses import fields
 import warnings
-
 import numpy as np
 
 from subhkl.core.crystallography import Lattice
@@ -11,28 +10,6 @@ from subhkl._optimization._helpers import (
     _forward_map_param, # only for legacy tests that need it
     _inverse_map_param,
 )
-
-from subhkl.utils.shim import (
-    HAS_JAX,
-    OPTIMIZATION_BACKEND, # for legacy tests that need it
-)
-
-
-def require_jax():
-    """
-    Check if JAX is available and raise an informative error if not.
-
-    Raises
-    ------
-    ImportError
-        If JAX and evosax are not installed.
-    """
-    if not HAS_JAX:
-        raise ImportError(
-            "JAX and evosax are required for this functionality. "
-            'Install with: pip install -e ".[jax]" or pip install jax jaxlib evosax'
-        )
-
 
 # NOTE(vivek): switch to builder api
 class FindUB:
@@ -113,72 +90,42 @@ class FindUB:
 
         When JAX is not available, falls back to SciPy's differential_evolution.
         """
-        if not HAS_JAX:
-            print("JAX not available - using SciPy-based optimization")
-            from ._scipy_minimize import _minimize_scipy
-            (num_indiexed, hkl, lamda, U, x), refined_state = _minimize_scipy(
-                population_size=population_size,
-                num_generations=num_generations,
-                n_runs=n_runs,
-                seed=seed,
-                tolerance_deg=tolerance_deg,
-                softness=softness,
-                loss_method=loss_method,
-                init_params=init_params,
-                refine_lattice=refine_lattice,
-                lattice_bound_frac=lattice_bound_frac,
-                goniometer_axes=goniometer_axes,
-                goniometer_angles=goniometer_angles,
-                refine_goniometer=refine_goniometer,
-                goniometer_bound_deg=goniometer_bound_deg,
-                goniometer_names=goniometer_names,
-                refine_goniometer_axes=refine_goniometer_axes,
-                refine_sample=refine_sample,
-                sample_bound_meters=sample_bound_meters,
-                refine_beam=refine_beam,
-                beam_bound_deg=beam_bound_deg,
-                d_min=d_min,
-                d_max=d_max,
-                hkl_search_range=hkl_search_range,
-                B_sharpen=B_sharpen,
-            )
-        else:
-            from ._jax_minimize import _jax_minimize
-            (num_indexed, hkl, lamda, U, x), refined_state = _jax_minimize(
-                state=self.state,
-                strategy_name=strategy_name,
-                population_size=population_size,
-                num_generations=num_generations,
-                n_runs=n_runs,
-                seed=seed,
-                tolerance_deg=tolerance_deg,
-                loss_method=loss_method,
-                init_params=init_params,
-                refine_lattice=refine_lattice,
-                lattice_bound_frac=lattice_bound_frac,
-                goniometer_axes=goniometer_axes,
-                goniometer_angles=goniometer_angles,
-                refine_goniometer=refine_goniometer,
-                goniometer_bound_deg=goniometer_bound_deg,
-                goniometer_names=goniometer_names,
-                refine_goniometer_axes=refine_goniometer_axes,
-                refine_sample=refine_sample,
-                sample_bound_meters=sample_bound_meters,
-                refine_beam=refine_beam,
-                beam_bound_deg=beam_bound_deg,
-                d_min=d_min,
-                d_max=d_max,
-                hkl_search_range=hkl_search_range,
-                search_window_size=search_window_size,
-                window_batch_size=window_batch_size,
-                chunk_size=chunk_size,
-                num_iters=num_iters,
-                top_k=top_k,
-                batch_size=batch_size,
-                sigma_init=sigma_init,
-                softness=softness,
-                B_sharpen=B_sharpen,
-            )
+        from ._jax_minimize import _jax_minimize
+        (num_indexed, hkl, lamda, U, x), refined_state = _jax_minimize(
+            state=self.state,
+            strategy_name=strategy_name,
+            population_size=population_size,
+            num_generations=num_generations,
+            n_runs=n_runs,
+            seed=seed,
+            tolerance_deg=tolerance_deg,
+            loss_method=loss_method,
+            init_params=init_params,
+            refine_lattice=refine_lattice,
+            lattice_bound_frac=lattice_bound_frac,
+            goniometer_axes=goniometer_axes,
+            goniometer_angles=goniometer_angles,
+            refine_goniometer=refine_goniometer,
+            goniometer_bound_deg=goniometer_bound_deg,
+            goniometer_names=goniometer_names,
+            refine_goniometer_axes=refine_goniometer_axes,
+            refine_sample=refine_sample,
+            sample_bound_meters=sample_bound_meters,
+            refine_beam=refine_beam,
+            beam_bound_deg=beam_bound_deg,
+            d_min=d_min,
+            d_max=d_max,
+            hkl_search_range=hkl_search_range,
+            search_window_size=search_window_size,
+            window_batch_size=window_batch_size,
+            chunk_size=chunk_size,
+            num_iters=num_iters,
+            top_k=top_k,
+            batch_size=batch_size,
+            sigma_init=sigma_init,
+            softness=softness,
+            B_sharpen=B_sharpen,
+        )
 
         for field in fields(refined_state):
             name = field.name

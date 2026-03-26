@@ -4,8 +4,7 @@ import scipy.linalg
 
 from subhkl.io.loader import ExperimentLoader
 from subhkl.core import Lattice
-from subhkl._optimization import findub as optimization 
-# from subhkl import optimization
+from subhkl import optimization
 
 def test_backend_flags_and_require_jax():
     # Module exposes HAS_JAX and OPTIMIZATION_BACKEND
