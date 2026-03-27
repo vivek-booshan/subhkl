@@ -1,5 +1,6 @@
 from enum import IntEnum, auto
 
+
 # Rank symmetries: Lower number = Lower Symmetry (More free params)
 class LatticeSystem(IntEnum):
     TRICLINIC = 0
@@ -150,4 +151,3 @@ LATTICE_CONFIG = {
         "reconstruct": lambda p: tuple(_get_col(p, i) for i in range(6)),
     },
 }
-

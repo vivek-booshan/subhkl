@@ -6,6 +6,7 @@ from subhkl.core.crystallography import Lattice
 from subhkl.core.experiment import PeaksData, ExperimentData
 from subhkl.instrument.goniometer import Goniometer
 
+
 # NOTE(vivek): switch to builder api
 class FindUB:
     def __init__(self, data: ExperimentData):
@@ -86,6 +87,7 @@ class FindUB:
         When JAX is not available, falls back to SciPy's differential_evolution.
         """
         from .minimize import minimize
+
         (num_indexed, hkl, lamda, U, x), refined_state = minimize(
             state=self.state,
             strategy_name=strategy_name,

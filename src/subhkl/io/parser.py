@@ -904,10 +904,7 @@ def peak_predictor(
     if offsets is not None:
         print(f"Applying refined goniometer offsets from indexer: {offsets}")
         # Re-calculate refined R stack for the TARGET images
-        if (
-            peaks.goniometer.angles is not None
-            and peaks.goniometer.axes is not None
-        ):
+        if peaks.goniometer.angles is not None and peaks.goniometer.axes is not None:
             angles_refined = peaks.goniometer.angles + offsets[None, :]
             all_R = np.stack(
                 [
@@ -985,9 +982,7 @@ def peak_predictor(
         f["goniometer/axes"] = peaks.goniometer.axes
         if peaks.goniometer.names:
             dt = h5py.string_dtype(encoding="utf-8")
-            f.create_dataset(
-                "goniometer/names", data=peaks.goniometer.names, dtype=dt
-            )
+            f.create_dataset("goniometer/names", data=peaks.goniometer.names, dtype=dt)
 
         f["sample/offset"] = sample_offset
         f["beam/ki_vec"] = ki_vec

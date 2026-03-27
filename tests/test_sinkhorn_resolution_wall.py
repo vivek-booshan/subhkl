@@ -26,8 +26,8 @@ def test_sinkhorn_resolution_wall():
         wavelength=wavelength,
         angle_cdf=angle_cdf,
         angle_t=angle_t,
-        icfg=IndexingConfig(hkl_search_range=hkl_search_range, loss_method="sinkhorn"),
         space_group="P 1",
+        icfg=IndexingConfig(loss_method="sinkhorn", hkl_search_range=hkl_search_range),
     )
 
     # Run sinkhorn indexer
@@ -36,6 +36,7 @@ def test_sinkhorn_resolution_wall():
 
     # We need to simulate k_sq_dyn to match the scale
     k_sq_dyn = np.sum(kf_ki_sample**2, axis=1)  # 100
+
     score, probs, best_hkl, best_lamb = sinkhorn_indexer(
         UB,
         obj.pool_hkl_flat,
@@ -49,7 +50,6 @@ def test_sinkhorn_resolution_wall():
         kf_ki_sample,
         k_sq_override=k_sq_dyn,
         tolerance_rad=0.01,
-
     )
 
     found_hkl = np.array(best_hkl[0, 0])

@@ -222,7 +222,7 @@ class _Objective:
         self.mask_range_h = h_max
         self.mask_range_k = k_max
         self.mask_range_l = l_max
-        self.mask_range = self.mask_range_h 
+        self.mask_range = self.mask_range_h
         self.valid_hkl_mask = jnp.array(mask_cpu)
         allowed = self.valid_hkl_mask[
             hkl_pool[0] + h_max, hkl_pool[1] + k_max, hkl_pool[2] + l_max
@@ -477,6 +477,7 @@ class _Objective:
     def __call__(self, x):
         score, _, _, _ = self.get_results(x)
         return score
+
 
 def _resolve_goniometer_mapping(
     state: ExperimentData, num_obs: int, goniometer_angles: Optional[np.ndarray]

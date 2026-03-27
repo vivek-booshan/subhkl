@@ -10,6 +10,7 @@ from subhkl.core.experiment import ExperimentData, PeaksData
 from subhkl.integration.image_data import ImageData
 from subhkl.instrument.goniometer import Goniometer
 
+
 class ImageLoader:
     def from_nexus(filename: str, instrument) -> ImageData:
         detectors = beamlines[instrument]
@@ -68,6 +69,7 @@ class ImageLoader:
             file_offsets=file_offsets,
             bank_mapping=bank_mapping,
         )
+
 
 class GoniometerLoader:
     def from_nexus(filename: str, instrument: str):
@@ -180,7 +182,6 @@ class ExperimentLoader:
         system, _ = Lattice.infer_system(sample_cell, sg)
         lattice = Lattice(*sample_cell, system)
 
-
         run_indices = cls._resolve_run_indices(data)
 
         goniometer_names = data.get("goniometer/names")
@@ -222,15 +223,14 @@ class ExperimentLoader:
         idx_img = data.get("peaks/image_index")
         idx_bank = data.get("bank", data.get("bank_ids"))
 
-
         if r_stack is not None and r_stack.ndim == 3:
             num_rot = r_stack.shape[0]
-        
+
             for candidate in [idx_run, idx_img, idx_bank]:
                 if candidate is not None:
                     if (int(np.max(candidate)) + 1) == num_rot:
                         return candidate
-        
+
         for fallback in [idx_run, idx_img, idx_bank]:
             if fallback is not None:
                 return fallback

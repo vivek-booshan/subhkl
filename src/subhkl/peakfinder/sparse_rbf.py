@@ -9,11 +9,14 @@ import numpy as np
 from scipy.spatial.distance import pdist, squareform
 from tqdm import tqdm
 
+
 def jnp_update_add(arr, idx, val):
     return arr.at[idx].add(val)
 
+
 def jnp_update_set(arr, idx, val):
     return arr.at[idx].set(val)
+
 
 class SparseRBFPeakFinder:
     """

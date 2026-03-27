@@ -4,6 +4,7 @@ import numpy as np
 from subhkl.io.loader import ExperimentLoader
 from subhkl._optimization import UBSolver
 
+
 def test_rotating_sample_offset():
     # 1. Physical Parameters
     a, b, c = 10.0, 10.0, 10.0
@@ -81,7 +82,8 @@ def test_rotating_sample_offset():
 
     # 4. Run Indexer (Stage 2 style: refine_sample=False)
     print("\n--- Running Indexer with Rotating Sample Offset ---")
-    result = (UBSolver()
+    result = (
+        UBSolver()
         .with_strategy("DE", 100, 50)
         .indexing_options(tolerance_deg=0.1, hkl_search_range=15)
         .solve(experiment)

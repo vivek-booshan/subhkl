@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation
 from subhkl.io.loader import ExperimentLoader
 from subhkl.core import Lattice
 from subhkl._optimization import UBSolver, Objective
-from subhkl._optimization import RefinementConfig,IndexingConfig
+from subhkl._optimization import RefinementConfig, IndexingConfig
 
 
 def generate_synthetic_data(
@@ -97,14 +97,12 @@ def test_multi_run_indexing_refinement():
     rotations = [[0.0], [45.0]]
     data = generate_synthetic_data(a, b, c, 90, 90, 90, U_true, rotations, gonio_axes)
     experiment = ExperimentLoader.from_dict(data)
-    result = (UBSolver()
+    result = (
+        UBSolver()
         .with_strategy("DE", 200, 100)
         .indexing_options(loss_method="gaussian", tolerance_deg=0.1)
         .solver_options(sigma_init=0.001, n_runs=1)
-        .solve(
-               experiment,
-               init_params=Rotation.from_matrix(U_true).as_rotvec()
-           )
+        .solve(experiment, init_params=Rotation.from_matrix(U_true).as_rotvec())
     )
     diff_R = result.U @ U_true.T
     angle = np.rad2deg(np.arccos(np.clip((np.trace(diff_R) - 1) / 2, -1, 1)))
@@ -123,7 +121,7 @@ def test_clipping_logic_direct():
         angle_cdf=np.zeros(4),
         angle_t=np.zeros(4),
         space_group="P 1 21 1",
-        icfg=IndexingConfig(hkl_search_range=2)
+        icfg=IndexingConfig(hkl_search_range=2),
     )
     h = np.array([0, 0, 0, 0])
     k = np.array([1, 2, 3, 4])
@@ -163,7 +161,8 @@ def test_sample_offset_refinement_multirun():
         sample_offset_true=s_true,
     )
     experiment = ExperimentLoader().from_dict(data)
-    result = (UBSolver()
+    result = (
+        UBSolver()
         .with_strategy("DE", 100, 500)
         .refinement_options(refine_sample=True, sample_bound_meters=0.005)
         .indexing_options(tolerance_deg=0.1, loss_method="gaussian")

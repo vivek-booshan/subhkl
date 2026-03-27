@@ -42,9 +42,7 @@ def _init_goniometer(
 
     if axes is not None and angles is not None:
         rot = Goniometer.get_rotation(axes, angles)
-        return Goniometer(
-            axes=axes, angles=angles, names=None, rotation=rot
-        )
+        return Goniometer(axes=axes, angles=angles, names=None, rotation=rot)
 
     return Goniometer()
 
@@ -92,7 +90,8 @@ def _check_if_merged(filename, ext) -> bool:
 
 # NOTE(vivek): Peaks is not an informative name
 class Peaks:
-    __slots__ = ('filename', 'instrument', 'goniometer', 'wavelength', 'image')
+    __slots__ = ("filename", "instrument", "goniometer", "wavelength", "image")
+
     def __init__(
         self,
         filename: str,

@@ -6,6 +6,7 @@ from subhkl.io.loader import ExperimentLoader
 from subhkl.core import Lattice
 from subhkl import optimization
 
+
 def test_backend_flags_and_require_jax():
     # Module exposes HAS_JAX and OPTIMIZATION_BACKEND
     assert isinstance(optimization.HAS_JAX, bool)
@@ -32,9 +33,7 @@ def test_param_mapping_roundtrip():
 
 def test_get_lattice_system_simple_cubic():
     final, num = Lattice.infer_system(
-        (10.0, 10.0, 10.0, 90.0, 90.0, 90.0),
-        "P 4 3 2",
-        return_type="str"
+        (10.0, 10.0, 10.0, 90.0, 90.0, 90.0), "P 4 3 2", return_type="str"
     )
     assert final == "Cubic"
     assert num == 1
@@ -57,7 +56,6 @@ def test_findub_load_from_dict_and_reciprocal_B():
     data["peaks/sigma"] = np.array([0.1])
     data["peaks/radius"] = np.array([0.0])
     data["sample/space_group"] = "P 1"
-
 
     # NOTE(vivek): enforce explicit loading of data and passing to FindUB
     experiment = ExperimentLoader.from_dict(data)

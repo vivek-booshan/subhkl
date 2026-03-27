@@ -16,7 +16,7 @@ def soft_indexer(
     d_max: float,
     weights,
     num_candidates: int,
-    centering: str, 
+    centering: str,
     mask_range_h: int,
     mask_range_k: int,
     mask_range_l: int,

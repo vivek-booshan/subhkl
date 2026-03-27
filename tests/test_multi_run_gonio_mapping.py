@@ -2,6 +2,7 @@ import numpy as np
 
 from subhkl.io.loader import ExperimentLoader
 
+
 def test_multi_run_mapping_fix_via_minimize():
     # Scenario: 2 images, 2 peaks per image = 4 peaks total.
     # Image 0 has rotation A, Image 1 has rotation B.

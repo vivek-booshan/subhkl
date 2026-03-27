@@ -26,7 +26,7 @@ def test_score_sign_consistency():
         wavelength=wavelength,
         angle_cdf=angle_cdf,
         angle_t=angle_t,
-        icfg=IndexingConfig(loss_method="gaussian")
+        icfg=IndexingConfig(loss_method="gaussian"),
     )
 
     # 2. Test Cosine Loss
@@ -37,7 +37,7 @@ def test_score_sign_consistency():
         wavelength=wavelength,
         angle_cdf=angle_cdf,
         angle_t=angle_t,
-        icfg=IndexingConfig(loss_method="cosine")
+        icfg=IndexingConfig(loss_method="cosine"),
     )
 
     # Simple identity orientation

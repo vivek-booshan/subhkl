@@ -5,6 +5,7 @@ import numpy as np
 
 from subhkl.core import ExperimentData
 
+
 @dataclass(frozen=True, slots=True)
 class Result:
     num_indexed: int
@@ -66,5 +67,3 @@ class SolverConfig:
     n_runs: int = 1
     seed: int = 0
     batch_size: Optional[int] = None
-
-

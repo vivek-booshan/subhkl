@@ -98,7 +98,9 @@ def cosine_indexer(
             hkl_int[:, 1, :],
             hkl_int[:, 2, :],
         )
-        is_allowed = check_hkl_symmetry(centering, h, k, l, mask_range_h, mask_range_k, mask_range_l, valid_hkl_mask)
+        is_allowed = check_hkl_symmetry(
+            centering, h, k, l, mask_range_h, mask_range_k, mask_range_l, valid_hkl_mask
+        )
 
         # Combine all masks
         final_mask = is_allowed & valid_res

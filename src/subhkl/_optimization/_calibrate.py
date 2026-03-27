@@ -8,6 +8,7 @@ from subhkl.core.experiment import ExperimentData
 from subhkl.core.models import LATTICE_CONFIG
 from subhkl.instrument.goniometer import Goniometer
 
+
 # NOTE(vivek): public facing allows passage of entire experiment data class
 # internally handles passing only the relevant data
 # allows internal func to be pure for jax optimization (i think)
@@ -50,6 +51,7 @@ def calibrate(
         base_sample_offset=new_sample,
     )
     return x0, bootstrapped_experiment
+
 
 def _get_bootstrap_params(
     lattice: Lattice,

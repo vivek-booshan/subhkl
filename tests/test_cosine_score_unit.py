@@ -1,6 +1,7 @@
 import numpy as np
 
 from subhkl._optimization import Objective, IndexingConfig
+from subhkl._optimization.indexers import cosine_indexer
 
 
 def test_cosine_indexer_negative_score_repro():
@@ -37,7 +38,7 @@ def test_cosine_indexer_negative_score_repro():
         angle_cdf=[0, 1],
         angle_t=[0, 1],
         weights=[1.0],
-        icfg=IndexingConfig(d_min=0.1, d_max=10.0)
+        icfg=IndexingConfig(d_min=0.1, d_max=10.0),
     )
 
     # 2. Mock Internal State for Indexing
@@ -49,8 +50,6 @@ def test_cosine_indexer_negative_score_repro():
     k_sq = np.array([[1.0]])
 
     # 3. Run Indexer
-    from subhkl._optimization.indexers import cosine_indexer
-
     score, probs, best_hkl, best_lamb = cosine_indexer(
         UB,
         obj.wl_min_val,

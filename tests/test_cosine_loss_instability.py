@@ -64,8 +64,9 @@ def test_cosine_loss_instability_at_high_index():
 
     R_off = Rotation.from_euler("y", 0.01, degrees=True).as_matrix()
     UB_off = R_off @ B
+
     score_off, probs_off, _, _ = cosine_indexer(
-        np.array(UB_off)[None, ...],
+        UB_off[None, ...],
         obj.wl_min_val,
         obj.wl_max_val,
         obj.d_min,

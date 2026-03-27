@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 
+
 # noqa: E741
 def check_hkl_symmetry(
     centering: str,

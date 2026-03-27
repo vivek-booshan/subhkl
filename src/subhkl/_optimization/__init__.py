@@ -5,10 +5,9 @@ from .objective import Objective
 from ._types import RefinementConfig, IndexingConfig, SolverConfig
 
 __all__ = [
-    "calibrate", # deprecate
-    "FindUB", # deprecate
-    "Objective", 
-
+    "calibrate",  # deprecate
+    "FindUB",  # deprecate
+    "Objective",
     "UBSolver",
     "RefinementConfig",
     "IndexingConfig",

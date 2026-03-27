@@ -4,7 +4,7 @@ from subhkl._optimization import Objective
 
 
 def test_init_sample_offset_rotation():
-    # Test if VectorizedObjective.__init__ correctly rotates sample offset
+    # Test if Objective.__init__ correctly rotates sample offset
     # if it's provided in sample frame.
 
     B = np.eye(3)
@@ -38,6 +38,12 @@ def test_init_sample_offset_rotation():
         peak_run_indices=np.arange(num_peaks),
     )
 
+    # In __init__:
+    # v = self.peak_xyz - self.sample_nominal[:, None]
+    # kf_lab_fixed = v / dist
+
+    # If sample_nominal was not rotated, v = (0, 0, 0.2) - (0.01, 0, 0) = (-0.01, 0, 0.2)
+    # If it WAS rotated, v = (0, 0, 0.2) - (0, 0, -0.01) = (0, 0, 0.21)
 
     kf_init = np.array(obj.kf_lab_fixed)
     print(f"Initial kf_lab_fixed[:, 0]: {kf_init[:, 0]}")
@@ -46,9 +52,9 @@ def test_init_sample_offset_rotation():
     expected_kf = expected_v / np.linalg.norm(expected_v)
 
     if not np.allclose(kf_init[:, 0], expected_kf):
-        print("BUG FOUND: VectorizedObjective.__init__ does not rotate sample_nominal!")
+        print("BUG FOUND: Objective.__init__ does not rotate sample_nominal!")
     else:
-        print("SUCCESS: VectorizedObjective.__init__ correctly rotates sample_nominal")
+        print("SUCCESS: Objective.__init__ correctly rotates sample_nominal")
 
 
 if __name__ == "__main__":

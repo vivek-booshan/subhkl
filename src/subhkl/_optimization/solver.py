@@ -7,7 +7,8 @@ import numpy as np
 
 from subhkl.core import ExperimentData
 
-from._types import RefinementConfig, IndexingConfig, SolverConfig
+from ._types import RefinementConfig, IndexingConfig, SolverConfig
+
 
 @dataclass(frozen=True, slots=True)
 class UBSolver:
@@ -226,12 +227,18 @@ class UBSolver:
             )
             x0 = None
 
-        # NOTE(vivek): remove goniometer_* as inputs to solve? 
+        # NOTE(vivek): remove goniometer_* as inputs to solve?
         gonio = replace(
             state.goniometer,
-            axes=goniometer_axes if goniometer_axes is not None else state.goniometer.axes,
-            angles=goniometer_angles if goniometer_angles is not None else state.goniometer.angles,
-            names=goniometer_names if goniometer_names is not None else state.goniometer.names,
+            axes=goniometer_axes
+            if goniometer_axes is not None
+            else state.goniometer.axes,
+            angles=goniometer_angles
+            if goniometer_angles is not None
+            else state.goniometer.angles,
+            names=goniometer_names
+            if goniometer_names is not None
+            else state.goniometer.names,
         )
         target_state = replace(target_state, goniometer=gonio)
 

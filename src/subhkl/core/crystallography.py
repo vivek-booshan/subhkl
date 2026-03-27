@@ -285,6 +285,7 @@ class Lattice:
 
 class LatticeSOA:
     """Dedicated class for structure of array oriented lattices"""
+
     @staticmethod
     def compute_B_batched(batched_lattice):
         deg2rad = jnp.pi / 180.0

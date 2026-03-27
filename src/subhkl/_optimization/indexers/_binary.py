@@ -3,6 +3,7 @@ import jax.numpy as jnp
 
 from ._utils import check_hkl_symmetry
 
+
 def binary_indexer(
     ub_mat,
     kf_ki_sample,
@@ -69,7 +70,9 @@ def binary_indexer(
             hkl_cands[..., 1],
             hkl_cands[..., 2],
         )
-        valid_sym = check_hkl_symmetry(centering, h, k, l, mask_range_h, mask_range_k, mask_range_l, valid_hkl_mask)
+        valid_sym = check_hkl_symmetry(
+            centering, h, k, l, mask_range_h, mask_range_k, mask_range_l, valid_hkl_mask
+        )
         valid_mask = valid_lamb & valid_res & valid_sym
         q_obs_opt = k_obs / jnp.where(lambda_opt == 0, 1.0, lambda_opt)[..., None]
         diff = q_obs_opt - q_pred

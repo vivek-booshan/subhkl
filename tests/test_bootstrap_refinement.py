@@ -7,7 +7,6 @@ from subhkl.core import Lattice
 from subhkl.io.loader import ExperimentLoader
 
 
-
 def test_u_absorbs_gonio_offset(tmp_path):
     """
     Test that orientation refinement can compensate for a fixed goniometer offset
@@ -85,7 +84,8 @@ def test_u_absorbs_gonio_offset(tmp_path):
     }
 
     experiment = ExperimentLoader.from_dict(data)
-    result = (UBSolver()
+    result = (
+        UBSolver()
         .with_strategy("DE", 500, 150)
         .refine(False, True)
         .physical_constraints(gonio_deg=5.0)

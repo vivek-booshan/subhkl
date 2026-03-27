@@ -12,6 +12,7 @@ LATTICE_MAP = {
     "triclinic": LatticeSystem.TRICLINIC,
 }
 
+
 def get_space_group_object(sg_name_or_centering):
     """
     Returns a gemmi.SpaceGroup object.

@@ -25,9 +25,9 @@ def test_sinkhorn_ignores_symmetry():
         wavelength=wavelength,
         angle_cdf=angle_cdf,
         angle_t=angle_t,
-        icfg=IndexingConfig(hkl_search_range=hkl_search_range, loss_method="sinkhorn"),
         space_group="I 2 2 2",
         centering="I",
+        icfg=IndexingConfig(hkl_search_range=hkl_search_range, loss_method="sinkhorn"),
     )
 
     # Run sinkhorn indexer simulation

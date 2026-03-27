@@ -5,6 +5,7 @@ import numpy as np
 from subhkl.core.crystallography import LatticeSOA
 from subhkl.core.math import rotation_from_axis_angle, rotation_from_rodrigues
 
+
 def update_add(arr, idx, val):
     return arr.at[idx].add(val)
 
@@ -74,6 +75,7 @@ def reconstruct_cell_params(
 
     return p_free
 
+
 def compute_goniometer_R(
     gonio_offsets_norm: jnp.ndarray,
     goniometer_bound_deg: float,
@@ -82,7 +84,7 @@ def compute_goniometer_R(
     gonio_axes: jnp.ndarray,
     num_gonio_axes: int,
 ) -> jnp.ndarray:
-        # NOTE: This helper uses Norm to calc Delta, then adds Nominal from self.
+    # NOTE: This helper uses Norm to calc Delta, then adds Nominal from self.
     """Computes the total Lab -> Sample rotation matrix R."""
     offsets_delta = _forward_map_param(gonio_offsets_norm, goniometer_bound_deg)
     total_offsets = gonio_nominal_offsets + offsets_delta
@@ -106,6 +108,7 @@ def compute_goniometer_R(
         R = jnp.matmul(R, Ri)
 
     return R
+
 
 def get_physical_params(
     x: jnp.ndarray,
@@ -214,4 +217,3 @@ def get_physical_params(
         R = None
 
     return UB, _B, sample_total, ki_vec, offsets_total, R
-

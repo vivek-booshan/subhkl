@@ -2,6 +2,7 @@ import importlib.util
 import pytest
 import numpy as np
 
+from subhkl.core.math import rotation_from_rodrigues
 from subhkl._optimization import Objective, IndexingConfig
 from subhkl._optimization.indexers import sinkhorn_indexer
 
@@ -36,7 +37,7 @@ def test_sinkhorn_vanishing_gradient():
         wavelength=[0.5, 2.5],
         angle_cdf=np.linspace(0, 1, 100),
         angle_t=np.linspace(0, np.pi, 100),
-        icfg=IndexingConfig(hkl_search_range=10, loss_method="sinkhorn"),
+        icfg=IndexingConfig(loss_method="sinkhorn", hkl_search_range=10),
         space_group="P 1",
     )
 
@@ -51,7 +52,6 @@ def test_sinkhorn_vanishing_gradient():
     # Calc score and gradient
     def get_score(orient):
         # Rodrigues vector
-        from subhkl.core.math import rotation_from_rodrigues
 
         U = rotation_from_rodrigues(orient)
         UB = U @ np.array(B)
@@ -66,7 +66,7 @@ def test_sinkhorn_vanishing_gradient():
             obj.pool_norm_q_pinned,
             obj.weights,
             np.array(kf_ki_dir)[None],
-            tolerance_rad=tol_rad
+            tolerance_rad=tol_rad,
         )
         return score[0]
 
