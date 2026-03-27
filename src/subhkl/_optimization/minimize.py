@@ -13,7 +13,7 @@ from subhkl.core import ExperimentData, Lattice
 from subhkl.core.math import rotation_from_rodrigues
 
 from ._helpers import get_physical_params
-from .optimization import VectorizedObjective
+from ._objective import _Objective
 from ._types import RefinementConfig, IndexingConfig, SolverConfig, Result
 
 
@@ -38,7 +38,7 @@ def minimize(
             "Need to supply --d_min and --d_max for loss_method=='forward'"
         )
 
-    objective = VectorizedObjective(state, rcfg, icfg)
+    objective = _Objective(state, rcfg, icfg)
     num_dims = objective.num_dims
     num_obs = objective.num_obs
 
@@ -343,7 +343,7 @@ def _print_refined_parameters(
     return
 
 
-def _get_jitted_value_and_grad(objective: VectorizedObjective):
+def _get_jitted_value_and_grad(objective: _Objective):
 
     @jax.jit
     def val_and_grad_fn(x_flat):

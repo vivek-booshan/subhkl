@@ -1,12 +1,14 @@
 from ._calibrate import calibrate
 from .findub import FindUB
 from .solver import UBSolver
-from .optimization import VectorizedObjective
+from .objective import Objective
 from ._types import RefinementConfig, IndexingConfig, SolverConfig
+
 __all__ = [
     "calibrate", # deprecate
-    "VectorizedObjective", 
     "FindUB", # deprecate
+    "Objective", 
+
     "UBSolver",
     "RefinementConfig",
     "IndexingConfig",
