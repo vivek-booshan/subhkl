@@ -84,6 +84,9 @@ markers = [
 [tool.ruff]
 include = ["pyproject.toml", "src/**/*.py", "scripts/**/*.py", "tests/**/*.py"]
 
+[tool.uv]
+cache-dir="/lustre/orion/gen006/world-shared/booshan/.cache/uv"
+
 [tool.ruff.lint]
 ignore = ["E741"]
 

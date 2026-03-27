@@ -1,6 +1,6 @@
 import numpy as np
 
-from subhkl.optimization import VectorizedObjective
+from subhkl._optimization import Objective, IndexingConfig
 
 
 def test_forbidden_reflections_allowed_if_out_of_bounds():
@@ -18,14 +18,14 @@ def test_forbidden_reflections_allowed_if_out_of_bounds():
     angle_cdf = np.linspace(0, 1, 100)
     angle_t = np.linspace(0, np.pi, 100)
 
-    obj = VectorizedObjective(
+    obj = Objective(
         B=B,
         kf_ki_dir=kf_ki_dir,
         peak_xyz_lab=None,
         wavelength=wavelength,
         angle_cdf=angle_cdf,
         angle_t=angle_t,
-        hkl_search_range=hkl_search_range,
+        icfg=IndexingConfig(hkl_search_range=hkl_search_range),
         space_group="I 2 2 2",
     )
 

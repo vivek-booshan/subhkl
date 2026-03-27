@@ -1,6 +1,6 @@
 import numpy as np
 
-from subhkl.optimization import VectorizedObjective
+from subhkl._optimization import Objective
 
 
 def test_init_sample_offset_rotation():
@@ -26,7 +26,7 @@ def test_init_sample_offset_rotation():
     sample_nominal = np.array([0.01, 0, 0])
 
     print("\nInitializing Objective with Sample Frame offset...")
-    obj = VectorizedObjective(
+    obj = Objective(
         B,
         kf_ki_dir,
         peak_xyz_lab,
@@ -38,12 +38,6 @@ def test_init_sample_offset_rotation():
         peak_run_indices=np.arange(num_peaks),
     )
 
-    # In __init__:
-    # v = self.peak_xyz - self.sample_nominal[:, None]
-    # kf_lab_fixed = v / dist
-
-    # If sample_nominal was not rotated, v = (0, 0, 0.2) - (0.01, 0, 0) = (-0.01, 0, 0.2)
-    # If it WAS rotated, v = (0, 0, 0.2) - (0, 0, -0.01) = (0, 0, 0.21)
 
     kf_init = np.array(obj.kf_lab_fixed)
     print(f"Initial kf_lab_fixed[:, 0]: {kf_init[:, 0]}")

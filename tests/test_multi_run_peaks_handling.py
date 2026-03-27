@@ -1,7 +1,7 @@
 import numpy as np
 import h5py
 import os
-from subhkl.integration import Peaks
+from subhkl.io.loader import ImageLoader
 
 
 def test_repro_multi_run_mapping_logic(tmp_path):
@@ -37,19 +37,18 @@ def test_repro_multi_run_mapping_logic(tmp_path):
         f.create_dataset("file_offsets", data=np.array([0, 2]))
 
     # 3. Setup Peaks object
-    peaks_handler = Peaks(master_h5, "MANDI")
-
+    images = ImageLoader.from_h5(master_h5)
     # Verify file_offsets were loaded correctly
-    assert peaks_handler.image.file_offsets is not None
-    assert np.array_equal(peaks_handler.image.file_offsets, [0, 2])
+    assert images.file_offsets is not None
+    assert np.array_equal(images.file_offsets, [0, 2])
 
     # 4. Simulate the loop in Peaks.integrate
     # For bank index 2 (which is the first bank of the SECOND file)
     bank_idx = 2
-    physical_bank = peaks_handler.image.bank_mapping.get(
+    physical_bank = images.bank_mapping.get(
         bank_idx, bank_idx
     )  # Should be 1
-    run_id = peaks_handler.get_run_id(bank_idx)  # Should be 1
+    run_id = images.get_run_id(bank_idx)  # Should be 1
 
     assert physical_bank == 1
     assert run_id == 1
@@ -69,8 +68,8 @@ def test_repro_multi_run_mapping_logic(tmp_path):
                 match_idxs.append(i)
 
         # 2. Match via source files
-        if not match_idxs and peaks_handler.image.raw_files:
-            for src_file in peaks_handler.image.raw_files:
+        if not match_idxs and images.raw_files:
+            for src_file in images.raw_files:
                 src_name = os.path.basename(src_file)
                 for i, fname_bytes in enumerate(files_db):
                     fname_str = fname_bytes.decode("utf-8")
@@ -114,10 +113,10 @@ def test_repro_visualization_filenames(tmp_path):
         f.create_dataset("goniometer/axes", data=[[0, 1, 0, 1]])
         f.create_dataset("goniometer/angles", data=np.zeros((2, 1)))
 
-    peaks_handler = Peaks(master_h5, "MANDI")
+    images = ImageLoader.from_h5(master_h5)
 
-    label0 = peaks_handler.get_image_label(0)
-    label1 = peaks_handler.get_image_label(1)
+    label0 = images.get_label(0)
+    label1 = images.get_label(1)
 
     assert label0 == label1 == "run1"
 

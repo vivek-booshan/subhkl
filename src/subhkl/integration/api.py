@@ -90,7 +90,9 @@ def _check_if_merged(filename, ext) -> bool:
         raise OSError
 
 
+# NOTE(vivek): Peaks is not an informative name
 class Peaks:
+    __slots__ = ('filename', 'instrument', 'goniometer', 'wavelength', 'image')
     def __init__(
         self,
         filename: str,
@@ -255,7 +257,7 @@ class Peaks:
 
         return peak_dict
 
-    # --- UPDATED INTEGRATE ---
+    # NOTE(vivek): should probably pull out
     def integrate(
         self,
         peak_dict,
@@ -271,7 +273,7 @@ class Peaks:
         file_prefix=None,
         found_peaks_file=None,
         max_workers=None,
-    ):
+    ) -> IntegrationResult:
         tasks = orchestrator.prepare_integrate_tasks(
             self.image,
             self.filename,

@@ -1,6 +1,6 @@
 import numpy as np
 
-from subhkl.optimization import VectorizedObjective
+from subhkl._optimization import Objective, IndexingConfig
 
 
 def test_score_sign_consistency():
@@ -19,25 +19,25 @@ def test_score_sign_consistency():
     angle_t = np.array([0.0, 1.0])
 
     # 1. Test Gaussian Loss
-    obj_gauss = VectorizedObjective(
+    obj_gauss = Objective(
         B=B,
         kf_ki_dir=kf_ki_dir,
         peak_xyz_lab=peak_xyz,
         wavelength=wavelength,
         angle_cdf=angle_cdf,
         angle_t=angle_t,
-        loss_method="gaussian",
+        icfg=IndexingConfig(loss_method="gaussian")
     )
 
     # 2. Test Cosine Loss
-    obj_cosine = VectorizedObjective(
+    obj_cosine = Objective(
         B=B,
         kf_ki_dir=kf_ki_dir,
         peak_xyz_lab=peak_xyz,
         wavelength=wavelength,
         angle_cdf=angle_cdf,
         angle_t=angle_t,
-        loss_method="cosine",
+        icfg=IndexingConfig(loss_method="cosine")
     )
 
     # Simple identity orientation

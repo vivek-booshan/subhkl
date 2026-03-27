@@ -1,5 +1,6 @@
 import numpy as np
-from subhkl.optimization import VectorizedObjective
+from subhkl._optimization import Objective, IndexingConfig
+from subhkl._optimization.indexers import cosine_indexer
 
 
 def test_cosine_loss_instability_at_high_index():
@@ -23,23 +24,36 @@ def test_cosine_loss_instability_at_high_index():
     angle_cdf = np.linspace(0, 1, 100)
     angle_t = np.linspace(0, np.pi, 100)
 
-    obj = VectorizedObjective(
+    obj = Objective(
         B=B,
         kf_ki_dir=q_lab,
         peak_xyz_lab=None,
         wavelength=wavelength,
         angle_cdf=angle_cdf,
         angle_t=angle_t,
-        loss_method="cosine",
-        tolerance_deg=0.1,
+        icfg=IndexingConfig(loss_method="cosine", tolerance_deg=0.1),
     )
 
     # 2. Evaluate Loss at True Orientation (U=Identity)
     UB_true = np.eye(3) @ np.array(B)
     kf_ki_sample = np.array(q_lab)[None, ...]  # (1, 3, 1)
 
-    score_true, probs_true, _, _ = obj.indexer_dynamic_cosine_aniso_jax(
-        UB_true[None, ...], kf_ki_sample, tolerance_rad=np.deg2rad(0.1)
+    score_true, probs_true, _, _ = cosine_indexer(
+        UB_true[None, ...],
+        obj.wl_min_val,
+        obj.wl_max_val,
+        obj.d_min,
+        obj.d_max,
+        obj.k_sq_init,
+        obj.num_candidates,
+        obj.weights,
+        obj.centering,
+        obj.mask_range_h,
+        obj.mask_range_k,
+        obj.mask_range_l,
+        obj.valid_hkl_mask,
+        kf_ki_sample,
+        tolerance_rad=np.deg2rad(0.1),
     )
 
     print(f"Score at True orientation: {score_true[0]}")
@@ -50,9 +64,20 @@ def test_cosine_loss_instability_at_high_index():
 
     R_off = Rotation.from_euler("y", 0.01, degrees=True).as_matrix()
     UB_off = R_off @ B
-
-    score_off, probs_off, _, _ = obj.indexer_dynamic_cosine_aniso_jax(
+    score_off, probs_off, _, _ = cosine_indexer(
         np.array(UB_off)[None, ...],
+        obj.wl_min_val,
+        obj.wl_max_val,
+        obj.d_min,
+        obj.d_max,
+        obj.k_sq_init,
+        obj.num_candidates,
+        obj.weights,
+        obj.centering,
+        obj.mask_range_h,
+        obj.mask_range_k,
+        obj.mask_range_l,
+        obj.valid_hkl_mask,
         kf_ki_sample,
         tolerance_rad=np.deg2rad(0.1),
     )

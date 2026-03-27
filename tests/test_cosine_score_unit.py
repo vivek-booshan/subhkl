@@ -1,6 +1,6 @@
 import numpy as np
 
-from subhkl.optimization import VectorizedObjective
+from subhkl._optimization import Objective, IndexingConfig
 
 
 def test_cosine_indexer_negative_score_repro():
@@ -29,7 +29,7 @@ def test_cosine_indexer_negative_score_repro():
     # Create instance
     # We only need the method, but we need 'self' parameters.
     # Passing dummy values for most things.
-    obj = VectorizedObjective(
+    obj = Objective(
         B=B,
         kf_ki_dir=np.array([[1.0], [0.0], [0.0]]),  # (3, 1)
         peak_xyz_lab=None,
@@ -37,8 +37,7 @@ def test_cosine_indexer_negative_score_repro():
         angle_cdf=[0, 1],
         angle_t=[0, 1],
         weights=[1.0],
-        d_min=0.1,
-        d_max=10.0,
+        icfg=IndexingConfig(d_min=0.1, d_max=10.0)
     )
 
     # 2. Mock Internal State for Indexing
@@ -50,8 +49,25 @@ def test_cosine_indexer_negative_score_repro():
     k_sq = np.array([[1.0]])
 
     # 3. Run Indexer
-    score, probs, best_hkl, best_lamb = obj.indexer_dynamic_cosine_aniso_jax(
-        UB, kf_ki_sample, k_sq_override=k_sq, tolerance_rad=0.01
+    from subhkl._optimization.indexers import cosine_indexer
+
+    score, probs, best_hkl, best_lamb = cosine_indexer(
+        UB,
+        obj.wl_min_val,
+        obj.wl_max_val,
+        obj.d_min,
+        obj.d_max,
+        obj.k_sq_init,
+        obj.num_candidates,
+        obj.weights,
+        obj.centering,
+        obj.mask_range_h,
+        obj.mask_range_k,
+        obj.mask_range_l,
+        obj.valid_hkl_mask,
+        kf_ki_sample,
+        k_sq_override=k_sq,
+        tolerance_rad=0.01,
     )
 
     print(f"Score: {score}")

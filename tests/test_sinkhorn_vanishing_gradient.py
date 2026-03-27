@@ -2,7 +2,8 @@ import importlib.util
 import pytest
 import numpy as np
 
-from subhkl.optimization import VectorizedObjective
+from subhkl._optimization import Objective, IndexingConfig
+from subhkl._optimization.indexers import sinkhorn_indexer
 
 
 @pytest.mark.xfail(
@@ -28,16 +29,15 @@ def test_sinkhorn_vanishing_gradient():
     q_ideal = B @ np.array([[1.0], [0.0], [0.0]])
     kf_ki_dir = q_ideal  # Use actual Q vector magnitude, not normalized
 
-    obj = VectorizedObjective(
+    obj = Objective(
         B=B,
         kf_ki_dir=kf_ki_dir,
         peak_xyz_lab=None,
         wavelength=[0.5, 2.5],
         angle_cdf=np.linspace(0, 1, 100),
         angle_t=np.linspace(0, np.pi, 100),
-        hkl_search_range=10,
+        icfg=IndexingConfig(hkl_search_range=10, loss_method="sinkhorn"),
         space_group="P 1",
-        loss_method="sinkhorn",
     )
 
     # Orientation offset (use Y or Z to ensure X-axis moves)
@@ -51,12 +51,22 @@ def test_sinkhorn_vanishing_gradient():
     # Calc score and gradient
     def get_score(orient):
         # Rodrigues vector
-        from subhkl.optimization import rotation_matrix_from_rodrigues_jax
+        from subhkl.core.math import rotation_from_rodrigues
 
-        U = rotation_matrix_from_rodrigues_jax(orient)
+        U = rotation_from_rodrigues(orient)
         UB = U @ np.array(B)
-        score, _, _, _ = obj.indexer_sinkhorn_jax(
-            UB[None], np.array(kf_ki_dir)[None], tolerance_rad=tol_rad
+        score, _, _, _ = sinkhorn_indexer(
+            UB[None],
+            obj.pool_hkl_flat,
+            obj.k_sq_init,
+            obj.wl_min_val,
+            obj.wl_max_val,
+            obj.d_min,
+            obj.d_max,
+            obj.pool_norm_q_pinned,
+            obj.weights,
+            np.array(kf_ki_dir)[None],
+            tolerance_rad=tol_rad
         )
         return score[0]
 

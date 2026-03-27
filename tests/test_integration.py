@@ -8,7 +8,8 @@ import pytest
 
 from subhkl.instrument.detector import Detector
 from subhkl.integration import Peaks
-from subhkl.optimization import FindUB
+from subhkl.io.loader import ExperimentLoader
+from subhkl._optimization import FindUB
 
 directory = os.path.dirname(os.path.abspath(__file__))
 
@@ -34,6 +35,7 @@ def test_mesolite():
     p = 2 * np.pi * r * 180 / 180
     h = 0.45
 
+    # FIX: new api does not have scale coordinates
     x, y = pks.scale_coordinates(xp, yp, p / nx, h / ny)
     fig, ax = plt.subplots(
         4, 1, figsize=(12.8, 19.2), sharex=False, layout="constrained"
@@ -72,7 +74,8 @@ def test_mesolite():
         f["peaks/scattering"] = two_theta
         f["peaks/azimuthal"] = az_phi
 
-    opt = FindUB(peaks_file)
+    data = ExperimentLoader.from_h5(peaks_file)
+    opt = FindUB(data)
 
     # Whether any run succeeded
     success = False
@@ -84,7 +87,7 @@ def test_mesolite():
         warnings.warn("what is 48?")
         num, hkl, lamda = opt.minimize(48)
 
-        ax[2].imshow(pks.im, norm="log", cmap="binary", origin="lower", extent=extent)
+        ax[2].imshow(pks.image, norm="log", cmap="binary", origin="lower", extent=extent)
 
         ax[2].plot(x, y, "r.")
         ax[2].minorticks_on()
@@ -141,7 +144,7 @@ def test_mesolite():
             xp = r * theta
 
             ax[3].imshow(
-                pks.im, norm="log", cmap="binary", origin="lower", extent=extent
+                pks.image, norm="log", cmap="binary", origin="lower", extent=extent
             )
 
             ax[3].scatter(x, y, edgecolor="r", facecolor="none")

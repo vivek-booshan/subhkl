@@ -1,6 +1,6 @@
 import numpy as np
 
-from subhkl.optimization import VectorizedObjective
+from subhkl._optimization import Objective
 
 
 def test_multi_run_rotation_assignment():
@@ -31,7 +31,7 @@ def test_multi_run_rotation_assignment():
     angle_t = np.linspace(0, np.pi, 100)
 
     # Initialize objective with peak_run_indices
-    obj = VectorizedObjective(
+    obj = Objective(
         B=B,
         kf_ki_dir=kf_ki_dir,
         peak_xyz_lab=None,

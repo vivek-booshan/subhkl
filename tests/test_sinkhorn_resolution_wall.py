@@ -1,6 +1,7 @@
 import numpy as np
 
-from subhkl.optimization import VectorizedObjective
+from subhkl._optimization import Objective, IndexingConfig
+from subhkl._optimization.indexers import sinkhorn_indexer
 
 
 def test_sinkhorn_resolution_wall():
@@ -18,16 +19,15 @@ def test_sinkhorn_resolution_wall():
     angle_cdf = np.linspace(0, 1, 100)
     angle_t = np.linspace(0, np.pi, 100)
 
-    obj = VectorizedObjective(
+    obj = Objective(
         B=B,
         kf_ki_dir=kf_ki_dir,
         peak_xyz_lab=None,
         wavelength=wavelength,
         angle_cdf=angle_cdf,
         angle_t=angle_t,
-        hkl_search_range=hkl_search_range,
+        icfg=IndexingConfig(hkl_search_range=hkl_search_range, loss_method="sinkhorn"),
         space_group="P 1",
-        loss_method="sinkhorn",
     )
 
     # Run sinkhorn indexer
@@ -36,9 +36,20 @@ def test_sinkhorn_resolution_wall():
 
     # We need to simulate k_sq_dyn to match the scale
     k_sq_dyn = np.sum(kf_ki_sample**2, axis=1)  # 100
+    score, probs, best_hkl, best_lamb = sinkhorn_indexer(
+        UB,
+        obj.pool_hkl_flat,
+        obj.k_sq_init,
+        obj.wl_min_val,
+        obj.wl_max_val,
+        obj.d_min,
+        obj.d_max,
+        obj.pool_norm_q_pinned,
+        obj.weights,
+        kf_ki_sample,
+        k_sq_override=k_sq_dyn,
+        tolerance_rad=0.01,
 
-    score, probs, best_hkl, best_lamb = obj.indexer_sinkhorn_jax(
-        UB, kf_ki_sample, k_sq_override=k_sq_dyn, tolerance_rad=0.01
     )
 
     found_hkl = np.array(best_hkl[0, 0])

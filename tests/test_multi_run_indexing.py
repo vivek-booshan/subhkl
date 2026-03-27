@@ -4,7 +4,7 @@ from scipy.spatial.transform import Rotation
 
 from subhkl.io.loader import ExperimentLoader
 from subhkl.core import Lattice
-from subhkl._optimization import UBSolver, VectorizedObjective
+from subhkl._optimization import UBSolver, Objective
 from subhkl._optimization import RefinementConfig,IndexingConfig
 
 
@@ -115,7 +115,7 @@ def test_clipping_logic_direct():
     a, b, c = 10, 10, 10
     alpha, beta, gamma = 90, 90, 90
     B = Lattice(a, b, c, alpha, beta, gamma).get_b_matrix()
-    obj = VectorizedObjective(
+    obj = Objective(
         B=B,
         kf_ki_dir=np.zeros((3, 4)),
         peak_xyz_lab=None,
@@ -212,7 +212,7 @@ def test_ghost_indexing_vulnerability():
     a, b, c = 10, 10, 10
     alpha, beta, gamma = 90, 90, 90
     B = Lattice(a, b, c, alpha, beta, gamma).get_b_matrix()
-    obj = VectorizedObjective(
+    obj = Objective(
         B=B,
         kf_ki_dir=np.zeros((3, 1)),
         peak_xyz_lab=None,
@@ -242,7 +242,7 @@ def test_stage1_blindness_vulnerability():
     B = np.eye(3)
     xyz_lab = np.array([[0.0, 0.0, 0.4]])
     s_nom = np.array([0.01, 0.0, 0.0])
-    obj = VectorizedObjective(
+    obj = Objective(
         B=B,
         kf_ki_dir=np.array([[0, 0, 1]]).T,
         peak_xyz_lab=xyz_lab,
@@ -270,7 +270,7 @@ def test_multirun_peaks_per_image_vulnerability():
     kf_ki_dir = np.random.randn(3, total_peaks)
     R_stack = np.stack([np.eye(3), np.eye(3)], axis=0)
 
-    obj = VectorizedObjective(
+    obj = Objective(
         B=B,
         kf_ki_dir=kf_ki_dir,
         peak_xyz_lab=None,
