@@ -184,7 +184,7 @@ class ExperimentLoader:
         run_indices = cls._resolve_run_indices(data)
 
         goniometer_names = data.get("goniometer/names")
-        if goniometer_names and isinstance(goniometer_names[0], bytes):
+        if goniometer_names is not None and isinstance(goniometer_names[0], bytes):
             goniometer_names = [n.decode("utf-8") for n in goniometer_names]
 
         peaks = PeaksData(
