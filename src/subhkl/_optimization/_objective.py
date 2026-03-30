@@ -179,15 +179,20 @@ class _Objective:
 
         ## OPTICAL RECONSTRUCTION (KF_LAB)
         self.kf_lab_fixed = None
-        if self.peak_xyz is not None:
-            v = self.peak_xyz - self.sample_nominal[:, None]
-            dist = jnp.linalg.norm(v, axis=0)
-            self.kf_lab_fixed = v / jnp.where(dist == 0, 1.0, dist[None, :])
-        else:
-            # Fallback to Lab vectors if XYZ detector geometry is missing
+        # if self.peak_xyz is not None:
+        #     v = self.peak_xyz - self.sample_nominal[:, None]
+        #     dist = jnp.linalg.norm(v, axis=0)
+        #     self.kf_lab_fixed = v / jnp.where(dist == 0, 1.0, dist[None, :])
+        # else:
+        # Fallback to Lab vectors if XYZ detector geometry is missing
+        if self.kf_ki_dir is not None:
             q_vecs = self.kf_ki_dir
             self.kf_lab_fixed = q_vecs + self.beam_nominal[:, None]
             self.kf_lab_fixed /= jnp.linalg.norm(self.kf_lab_fixed, axis=0)
+        elif self.peaks.xyz is not None:
+            v = self.peak_xyz - self.sample_nominal[:, None]
+            dist = jnp.linalg.norm(v, axis=0)
+            self.kf_lab_fixed = v / jnp.where(dist == 0, 1.0, dist[None, :])
 
         ## SEARCH POOL & HKL POOL GENERATION
         self.d_min = icfg.d_min if icfg.d_min is not None else 0.0
@@ -315,7 +320,10 @@ class _Objective:
             R_per_peak = None
 
         # Determine current scattered beam directions (kf) in Lab frame
-        if self.peak_xyz is not None:
+        needs_dynamic_recalc = (
+            self.refine_sample or self.refine_beam or self.refine_goniometer
+        )
+        if self.peak_xyz is not None and needs_dynamic_recalc:
             # Recalculate kf for every run/peak because the sample position s_lab
             # depends on the goniometer rotation R and the refined sample offset.
             if R_per_peak is not None:
@@ -348,10 +356,14 @@ class _Objective:
             q_lab = kf - ki
             k_sq_dyn = jnp.sum(q_lab**2, axis=1)
         else:
-            kf = self.kf_lab_fixed[None, :, :].repeat(x.shape[0], axis=0)
-            ki = ki_vec[:, :, None]
-            q_lab = kf - ki
-            k_sq_dyn = jnp.sum(q_lab**2, axis=1)
+            if self.refine_beam:
+                q_lab = self.kf_ki_dir[None, :, :].repeat(x.shape[0], axis=0)
+                k_sq_dyn = self.k_sq_init[None, :].repeat(x.shape[0], axis=0)
+            else:
+                kf = self.kf_lab_fixed[None, :, :].repeat(x.shape[0], axis=0)
+                ki = ki_vec[:, :, None]
+                q_lab = kf - ki
+                k_sq_dyn = jnp.sum(q_lab**2, axis=1)
 
         # Rotate to SAMPLE FRAME: q_sample = R^T * q_lab
         # (Inputs are always in Lab frame and require rotation)
