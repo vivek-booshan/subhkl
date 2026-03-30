@@ -1,4 +1,4 @@
-from dataclasses import dataclass, fields, field, replace, asdict, astuple
+from dataclasses import dataclass, fields, field, replace, asdict 
 
 # from enum import IntFlag, auto
 from typing import Optional, List

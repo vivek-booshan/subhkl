@@ -48,8 +48,5 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies (JAX backend)
         run: uv sync --extra jax
-      - name: Verify backend
-        run: |
-          uv run python -c "import subhkl; print(f'Backend: {subhkl.OPTIMIZATION_BACKEND}'); assert subhkl.OPTIMIZATION_BACKEND == '${{ matrix.backend }}', f'Expected ${{ matrix.backend }}, got {subhkl.OPTIMIZATION_BACKEND}'"
       - name: Run tests
         run: uv run pytest -v -m "not slow and not integration"

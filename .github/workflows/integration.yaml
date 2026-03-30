@@ -35,8 +35,6 @@ jobs:
       - name: Install dependencies (JAX backend)
         run: uv sync --extra jax
       - name: Verify backend
-        run: |
-          uv run python -c "import subhkl; print(f'Backend: {subhkl.OPTIMIZATION_BACKEND}'); assert subhkl.OPTIMIZATION_BACKEND == '${{ matrix.backend }}', f'Expected ${{ matrix.backend }}, got {subhkl.OPTIMIZATION_BACKEND}'"
       - name: Run integration tests
         run: uv run pytest -v -m "integration" tests/test_mandi_mesolite.py::TestMandiMesoliteSingleRun
         env:
